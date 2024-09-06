@@ -359,4 +359,3 @@ class OrigamiNetwork():
             return probabilities
         else:
             return predictions
-        
