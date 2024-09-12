@@ -262,6 +262,7 @@ class OrigamiNetwork():
         Returns:
             None
         """
+        
         # Raise an error if there are no epochs or batch size, or if batch size is greater than the number of points
         if self.batch_size is None or self.epochs is None:
             raise ValueError("Batch size or epochs must be specified")

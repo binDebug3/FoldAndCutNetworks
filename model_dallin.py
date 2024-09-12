@@ -3,6 +3,7 @@ from tqdm import tqdm
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 import pickle
+from matplotlib import pyplot as plt
 
 class OrigamiNetwork():
     def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, optimizer="grad", batch_size=32, epochs=100):
@@ -93,6 +94,7 @@ class OrigamiNetwork():
         Returns:
             batches (list) - A list of batches of indices for training
         """
+        raise NotImplementedError("Stochastic Gradient Descent is not implemented yet")
         # Get randomized indices and calculate the number of batches
         indices = np.arange(self.n)
         np.random.shuffle(indices)
@@ -117,10 +119,12 @@ class OrigamiNetwork():
     
     
     
-    def fold(self, Z, n):
+    def fold(self, Z, n, leaky=0.1):
         # Make the scalled inner product and the mask
         scales = (Z@n)/np.dot(n, n)
         indicator = scales > 1
+        indicator = indicator.astype(int)
+        indicator = indicator + (1 - indicator) * leaky
         
         # Make the projection and flip the points that are beyond the fold (mask)
         projected = np.outer(scales, n)
@@ -128,22 +132,29 @@ class OrigamiNetwork():
     
     
     
-    def derivative_fold(self, Z, n):
+    def derivative_fold(self, Z, n, leaky=0.1):
         # Get the scaled inner product, mask, and make the identity stack
-        n_normal = n / np.dot(n,n)
-        scales = Z @ n_normal
-        mask = scales > 1
+        # NOTE: 
+        quad_normal = n / np.dot(n, n)
+        scales = Z @ quad_normal
+        indicator = scales > 1
+        indicator = indicator.astype(int)
+        indicator = indicator + (1 - indicator) * leaky
+        # plot Z colored by mask
+        # plt.scatter(Z[:,0], Z[:,1], c=mask)
+        # plt.show()
         identity = np.eye(self.width)
 
         # Use broadcasting to apply scales along the first axis
         first_component = (1 - scales)[:, np.newaxis, np.newaxis] * identity
         
         # Calculate the outer product of n and helper, then subtract the input
-        outer_product = np.outer(2 * scales, n_normal) - Z
-        second_component = np.einsum('ij,k->ikj', outer_product, n_normal)
+        outer_product = np.outer(2 * scales, quad_normal) - Z
+        second_component = np.einsum('ij,k->ikj', outer_product, quad_normal)
         
         # Return the derivative
-        return 2 * mask[:,np.newaxis, np.newaxis] * (first_component + second_component)
+        derivative = 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
+        return derivative
     
     
     
@@ -262,6 +273,7 @@ class OrigamiNetwork():
         Returns:
             None
         """
+        raise NotImplementedError("Stochastic Gradient Descent is not implemented yet")
         # Raise an error if there are no epochs or batch size, or if batch size is greater than the number of points
         if self.batch_size is None or self.epochs is None:
             raise ValueError("Batch size or epochs must be specified")
@@ -357,7 +369,6 @@ class OrigamiNetwork():
             raise ValueError("Stochastic Gradient Descent is not implemented yet")
         elif self.optimizer == "grad":
             self.gradient_descent(verbose=verbose)
-
         # Otherwise, raise an error
         else:
             raise ValueError("Optimizer must be 'sgd' or 'grad'")
