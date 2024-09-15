@@ -4,6 +4,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 import pickle
 from matplotlib import pyplot as plt
+import copy
 
 class OrigamiNetwork():
     def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, optimizer="grad", batch_size=32, epochs=100):
@@ -196,12 +197,13 @@ class OrigamiNetwork():
     
     
     
-    def back_propagation(self, indices:np.ndarray):
+    def back_propagation(self, indices:np.ndarray, freeze_folds:bool=False):
         """
         Perform a back propagation of the data through the model
 
         Parameters:
             indices (ndarray) - The indices of the data to back propagate
+            freeze_folds (bool) - Whether to freeze the folds during back propogation
         Returns:
             gradient list - The gradient of the model (ndarrays)
         """
@@ -222,7 +224,11 @@ class OrigamiNetwork():
         gradient.append(db)
         
         # Calculate the gradients of each fold using the forward propogation
-        fold_grads = [self.derivative_fold(forward[i], self.fold_vectors[i]) for i in range(self.layers)]
+        if freeze_folds:
+            raise NotImplementedError("Freezing the folds is not working right yet")
+            fold_grads = [np.zeros((self.n, self.d, self.d)) for i in range(self.layers)]
+        else:
+            fold_grads = [self.derivative_fold(forward[i], self.fold_vectors[i]) for i in range(self.layers)]
         
         # Perform the back propogation for the folds
         backprop_start = outer_layer @ self.output_layer
@@ -236,10 +242,11 @@ class OrigamiNetwork():
         
     
     ########################## Optimization and Training Functions ############################
-    def gradient_descent(self, verbose=0):
+    def gradient_descent(self, freeze_folds:bool=False, verbose=0):
         """
         Perform gradient descent on the model
         Parameters:
+            freeze_folds (bool) - Whether to freeze the folds during back propogation
             verbose (int) - Whether to show the progress of the training (default is 0)
         Returns:
             fold_history (list) - A list of the fold vectors at each iteration
@@ -249,7 +256,7 @@ class OrigamiNetwork():
         fold_history = []
         for i in range(self.max_iter):
             # Get the gradient
-            gradient = self.back_propagation(np.arange(self.n))
+            gradient = self.back_propagation(np.arange(self.n), freeze_folds=freeze_folds)
             
             # Clip any gradients that are too large
             max_norm = 5.0
@@ -333,7 +340,7 @@ class OrigamiNetwork():
 
 
 
-    def fit(self, X:np.ndarray, y:np.ndarray, X_val_set=None, y_val_set=None, verbose=1):
+    def fit(self, X:np.ndarray=None, y:np.ndarray=None, X_val_set=None, y_val_set=None, freeze_folds:bool=False, verbose=1):
         """
         Fit the model to the data
 
@@ -342,18 +349,24 @@ class OrigamiNetwork():
             y (n,) ndarray - The labels of the data
             X_val_set (n_val,d) ndarray - The validation set for the data
             y_val_set (n_val,) ndarray - The validation labels for the data
+            freeze_folds (bool) - Whether to freeze the folds during back propogation
             verbose (int) - Whether to show the progress of the training (default is 1)
         Returns:
             train_history (list) - A list of training accuracies
             val_history (list) - A list of validation accuracies
             fold_history (list) - A list of the fold vectors at each iteration
         """
+        if X is None and self.X is None:
+            raise ValueError("X must be provided")
+        if y is None and self.y is None:
+            raise ValueError("y must be provided")
+        
         # Save the data as variables and encode y
-        self.X = np.array(X)
-        self.y = np.array(y)
-        self.n = X.shape[0]
-        self.d = X.shape[1]
-        self.encode_y(y)
+        self.X = np.array(X) if X is not None else self.X
+        self.y = np.array(y) if y is not None else self.y
+        self.n = self.X.shape[0]
+        self.d = self.X.shape[1]
+        self.encode_y(self.y)
 
         # Initialize the expand matrix if necessary
         if self.has_expand:
@@ -375,7 +388,7 @@ class OrigamiNetwork():
         if self.optimizer == "sgd":
             raise ValueError("Stochastic Gradient Descent is not implemented yet")
         elif self.optimizer == "grad":
-            fold_history = self.gradient_descent(verbose=verbose)
+            fold_history = self.gradient_descent(freeze_folds=freeze_folds, verbose=verbose)
         # Otherwise, raise an error
         else:
             raise ValueError("Optimizer must be 'sgd' or 'grad'")
@@ -475,29 +488,30 @@ class OrigamiNetwork():
     
     
     
-    def loss_landscape(self, loss_layers:int=None, X:np.ndarray=None, y:np.ndarray=None, 
+    def score_landscape(self, score_layers:int=None, X:np.ndarray=None, y:np.ndarray=None, 
                        feature_mins:list=None, feature_maxes:list=None, density:int=10, 
                        f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
-                       verbose:int=0):
+                       learning:bool=False, verbose:int=0):
         """
-        This function visualizes the loss landscape of the model for a given layer and two features.
+        This function visualizes the score landscape of the model for a given layer and two features.
         
         Parameters:
-            loss_layers (int) - The layer to calculate the loss landscape for
-            X (n,d) ndarray - The data to calculate the loss landscape on
+            score_layers (int) - The layer to calculate the score landscape for
+            X (n,d) ndarray - The data to calculate the score landscape on
             y (n,) ndarray - The labels of the data
             feature_mins (list) - The minimum values for each feature
             feature_maxes (list) - The maximum values for each feature
-            density (int) - The number of points to calculate the loss for
-            f1id (int) - The id of the first feature to calculate the loss for
-            f2id (int) - The id of the second feature to calculate the loss for
-            create_plot (bool) - Whether to create a plot of the loss landscape
+            density (int) - The number of points to calculate the score for
+            f1id (int) - The id of the first feature to calculate the score for
+            f2id (int) - The id of the second feature to calculate the score for
+            create_plot (bool) - Whether to create a plot of the score landscape
             png_path (str) - The path to save the plot to
             theme (str) - The theme of the plot
+            learning (bool) - Whether to learn from the maximum score and features
             verbose (int) - Whether to show the progress of the training (default is 1)
         Returns:
-            min_loss (float) - The minimum loss of the model
-            min_features (list) - The features that produced the minimum loss
+            max_score (float) - The maximum score of the model
+            max_features (list) - The features that produced the maximum score
         """
         # set default values
         X = X if X is not None else self.X
@@ -505,12 +519,13 @@ class OrigamiNetwork():
         density = [density]*self.d if density is not None else [10]*self.d
         feature_mins = feature_mins if feature_mins is not None else np.min(X, axis=0)
         feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
-        loss_layers = loss_layers if type(loss_layers) == list else [loss_layers] if type(loss_layers) == int else [l for l in range(self.layers)]
+        score_layers = score_layers if type(score_layers) == list else [score_layers] if type(score_layers) == int else [l for l in range(self.layers)]
+        og_fold_vectors = copy.deepcopy(self.fold_vectors)
 
         # input error handling
         assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
         assert type(y) == np.ndarray, f"y must be a numpy array. Instead got {type(y)}"
-        assert type(loss_layers) == int or (type(loss_layers) == list and len(loss_layers) > 0 and type(loss_layers[0]) == int), f"loss_layer must be an integer. instead got {loss_layers}"
+        assert type(score_layers) == int or (type(score_layers) == list and len(score_layers) > 0 and type(score_layers[0]) == int), f"score_layer must be an integer. instead got {score_layers}"
         assert type(density) == list or (len(density) > 0 and type(density[0]) == int), f"Density must be a list of integers. Instead got {density}"
         
         # create a grid of features
@@ -521,23 +536,23 @@ class OrigamiNetwork():
         
         
         
-        # compute losses for each feature combination and each layer
-        min_losses = []
-        min_features_list = []
-        for loss_layer in loss_layers:
-            losses = []
-            for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"Loss Layer {loss_layer}"):
-                self.fold_vectors[loss_layer] = features
-                losses.append(self.score(X, y))
+        # compute scores for each feature combination and each layer
+        max_scores = []
+        max_features_list = []
+        for score_layer in score_layers:
+            scores = []
+            for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
+                self.fold_vectors[score_layer] = features
+                scores.append(self.score(X, y))
                 
-            # find the minimum loss and the features that produced it
-            losses = np.array(losses)
-            min_loss = np.min(losses)
-            min_index = np.argmin(losses)
-            min_losses.append(min_loss)
-            min_features_list.append(feature_combinations[min_index])
+            # find the maximum score and the features that produced it
+            scores = np.array(scores)
+            max_score = np.max(scores)
+            max_index = np.argmax(scores)
+            max_scores.append(max_score)
+            max_features_list.append(feature_combinations[max_index])
             
-            # create a heatmap of the loss landscape for features f1id and f2id
+            # create a heatmap of the score landscape for features f1id and f2id
             if create_plot:
                 f1 = feature_combinations[:,f1id]
                 f2 = feature_combinations[:,f2id]
@@ -546,49 +561,58 @@ class OrigamiNetwork():
                 f1_name = self.feature_names[f1id] if self.feature_names is not None else f"Feature {f1id}"
                 f2_name = self.feature_names[f2id] if self.feature_names is not None else f"Feature {f2id}"
                 
-                # get just the losses where the two features are unique in feature_combinations
+                # get just the scores where the two features are unique in feature_combinations
                 mesh = np.zeros((density[f2id], density[f1id]))
                 for i, f1_val in enumerate(f1_folds):
                     for j, f2_val in enumerate(f2_folds):
-                        mesh[j,i] = losses[np.where((f1 == f1_val) & (f2 == f2_val))[0][0]]
+                        mesh[j,i] = scores[np.where((f1 == f1_val) & (f2 == f2_val))[0][0]]
                 
+                offset = 1 if self.has_expand else 0
+                self.fold_vectors = og_fold_vectors.copy()
+                paper = self.forward_pass(X)
+                outx = paper[offset + score_layer][:,f1id]
+                outy = paper[offset + score_layer][:,f2id]
+
                 # plot input to layer
-                if create_plot:
-                    plt.figure(figsize=(12,6))
-                    offset = 1 if self.has_expand else 2
-                    paper = self.forward_pass(X)
-                    input = paper[offset + loss_layer]
-                    outx = paper[offset + loss_layer][:,0]
-                    outy = paper[offset + loss_layer][:,1]
-                    plt.subplot(121)
-                    plt.scatter(input[:,f1id], input[:,f2id], c=y, cmap="viridis")
-                    plt.xlabel(f1_name)
-                    plt.ylabel(f2_name)
-                    plt.title(f"Input to Layer {loss_layer}")
-                    self.draw_fold(self.fold_vectors[loss_layer], outx, outy, color="red", name="Predicted Fold")
-                    self.draw_fold(min_features_list[-1], outx, outy, color="black", name="Minimum Loss Fold")
-                    plt.legend()
-                
-                    # plot the heatmap
-                    plt.subplot(122)
-                    plt.pcolormesh(f1_folds, f2_folds, mesh, cmap=theme)
-                    # plt.scatter(np.where(f1_folds == f1[min_index])[0], np.where(f2_folds == f2[min_index])[0], color="red", label="Minimum Loss")
-                    plt.xlabel(f1_name)
-                    plt.ylabel(f2_name) 
-                    plt.title(f"Loss Landscape for Layer {loss_layer}")
-                    plt.colorbar()
-                    if png_path is not None:
-                        try:
-                            plt.savefig(png_path)
-                        except Exception as e:
-                            print(e)
-                            print(f"The path '{png_path}' is not valid")
-                    plt.tight_layout()
-                    plt.show()
+                plt.figure(figsize=(12,6))
+                plt.subplot(121)
+                plt.scatter(outx, outy, c=y, cmap="viridis")
+                self.draw_fold(self.fold_vectors[score_layer], outx, outy, color="red", name="Predicted Fold")
+                self.draw_fold(max_features_list[-1], outx, outy, color="black", name="Maximum Score Fold")
+                plt.xlabel(f1_name)
+                plt.ylabel(f2_name)
+                plt.title(f"Input to Layer {score_layer}")
+                plt.legend()
             
-        if len(min_losses) == 1:
-            return min_losses[0], min_features_list[0]
-        return min_losses, min_features_list
+                # plot the heatmap
+                plt.subplot(122)
+                plt.pcolormesh(f1_folds, f2_folds, mesh, cmap=theme)
+                # plt.scatter(np.where(f1_folds == f1[max_index])[0], np.where(f2_folds == f2[max_index])[0], color="red", label="maximum score")
+                plt.xlabel(f1_name)
+                plt.ylabel(f2_name) 
+                plt.title(f"Score Landscape for Layer {score_layer}")
+                plt.colorbar()
+                if png_path is not None:
+                    try:
+                        plt.savefig(png_path)
+                    except Exception as e:
+                        print(e)
+                        print(f"The path '{png_path}' is not valid")
+                plt.tight_layout()
+                plt.show()
+            else:
+                self.fold_vectors = og_fold_vectors
+        
+            if learning:
+                raise NotImplementedError("Learning from the maximum score is not working yet")
+                # update weights with the best fold for this layer
+                self.fold_vectors[score_layer] = max_features_list[-1].copy()
+                # update input and output layers
+                self.fit(freeze_folds=True, verbose=0)
+        
+        if len(max_scores) == 1:
+            return max_scores[0], max_features_list[0]
+        return max_scores, max_features_list
         
 
 
