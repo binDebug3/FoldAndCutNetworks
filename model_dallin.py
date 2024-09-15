@@ -23,6 +23,7 @@ class OrigamiNetwork():
         self.y = None
         self.n = None
         self.d = None
+        self.feature_names = None
         self.classes = None
         self.num_classes = None
         self.y_dict = None
@@ -119,7 +120,7 @@ class OrigamiNetwork():
     
     
     
-    def fold(self, Z, n, leaky=0.1):
+    def fold(self, Z, n, leaky=0.):
         # Make the scalled inner product and the mask
         scales = (Z@n)/np.dot(n, n)
         indicator = scales > 1
@@ -128,11 +129,12 @@ class OrigamiNetwork():
         
         # Make the projection and flip the points that are beyond the fold (mask)
         projected = np.outer(scales, n)
-        return Z + 2 * indicator[:,np.newaxis] * (n - projected)
+        folded = Z + 2 * indicator[:,np.newaxis] * (n - projected)
+        return folded
     
     
     
-    def derivative_fold(self, Z, n, leaky=0.1):
+    def derivative_fold(self, Z, n, leaky=0.):
         # Get the scaled inner product, mask, and make the identity stack
         # NOTE: 
         quad_normal = n / np.dot(n, n)
@@ -140,9 +142,6 @@ class OrigamiNetwork():
         indicator = scales > 1
         indicator = indicator.astype(int)
         indicator = indicator + (1 - indicator) * leaky
-        # plot Z colored by mask
-        # plt.scatter(Z[:,0], Z[:,1], c=mask)
-        # plt.show()
         identity = np.eye(self.width)
 
         # Use broadcasting to apply scales along the first axis
@@ -164,7 +163,11 @@ class OrigamiNetwork():
         Perform a forward pass of the data through the model
 
         Parameters:
-            D (n,d) ndarray - The data to pass through the model"""
+            D (n,d) ndarray - The data to pass through the model
+        
+        Returns:
+            output list - The output of the model at each layer    
+        """
         # Expand to a higher dimension if necessary
         if self.has_expand:
             Z = D @ self.input_layer.T
@@ -239,10 +242,11 @@ class OrigamiNetwork():
         Parameters:
             verbose (int) - Whether to show the progress of the training (default is 0)
         Returns:
-            None
+            fold_history (list) - A list of the fold vectors at each iteration
         """
         # show_iter = max(self.max_iter,100) // 100
         progress = tqdm(total=self.max_iter, position=0, leave=True, desc="Training Progress", disable=verbose==0)
+        fold_history = []
         for i in range(self.max_iter):
             # Get the gradient
             gradient = self.back_propagation(np.arange(self.n))
@@ -259,8 +263,10 @@ class OrigamiNetwork():
             # Update the fold vectors
             for i in range(self.layers):
                 self.fold_vectors[i] -= self.learning_rate * gradient[i+2]
+            fold_history.append(self.fold_vectors.copy())
             progress.update()
         progress.close()
+        return fold_history
 
 
 
@@ -340,6 +346,7 @@ class OrigamiNetwork():
         Returns:
             train_history (list) - A list of training accuracies
             val_history (list) - A list of validation accuracies
+            fold_history (list) - A list of the fold vectors at each iteration
         """
         # Save the data as variables and encode y
         self.X = np.array(X)
@@ -368,10 +375,11 @@ class OrigamiNetwork():
         if self.optimizer == "sgd":
             raise ValueError("Stochastic Gradient Descent is not implemented yet")
         elif self.optimizer == "grad":
-            self.gradient_descent(verbose=verbose)
+            fold_history = self.gradient_descent(verbose=verbose)
         # Otherwise, raise an error
         else:
             raise ValueError("Optimizer must be 'sgd' or 'grad'")
+        return fold_history
         
         
 
@@ -465,6 +473,152 @@ class OrigamiNetwork():
         # TODO: Test this function
         return self.__dict__
     
+    
+    
+    def loss_landscape(self, loss_layers:int=None, X:np.ndarray=None, y:np.ndarray=None, 
+                       feature_mins:list=None, feature_maxes:list=None, density:int=10, 
+                       f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
+                       verbose:int=0):
+        """
+        This function visualizes the loss landscape of the model for a given layer and two features.
+        
+        Parameters:
+            loss_layers (int) - The layer to calculate the loss landscape for
+            X (n,d) ndarray - The data to calculate the loss landscape on
+            y (n,) ndarray - The labels of the data
+            feature_mins (list) - The minimum values for each feature
+            feature_maxes (list) - The maximum values for each feature
+            density (int) - The number of points to calculate the loss for
+            f1id (int) - The id of the first feature to calculate the loss for
+            f2id (int) - The id of the second feature to calculate the loss for
+            create_plot (bool) - Whether to create a plot of the loss landscape
+            png_path (str) - The path to save the plot to
+            theme (str) - The theme of the plot
+            verbose (int) - Whether to show the progress of the training (default is 1)
+        Returns:
+            min_loss (float) - The minimum loss of the model
+            min_features (list) - The features that produced the minimum loss
+        """
+        # set default values
+        X = X if X is not None else self.X
+        y = y if y is not None else self.y
+        density = [density]*self.d if density is not None else [10]*self.d
+        feature_mins = feature_mins if feature_mins is not None else np.min(X, axis=0)
+        feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
+        loss_layers = loss_layers if type(loss_layers) == list else [loss_layers] if type(loss_layers) == int else [l for l in range(self.layers)]
+
+        # input error handling
+        assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
+        assert type(y) == np.ndarray, f"y must be a numpy array. Instead got {type(y)}"
+        assert type(loss_layers) == int or (type(loss_layers) == list and len(loss_layers) > 0 and type(loss_layers[0]) == int), f"loss_layer must be an integer. instead got {loss_layers}"
+        assert type(density) == list or (len(density) > 0 and type(density[0]) == int), f"Density must be a list of integers. Instead got {density}"
+        
+        # create a grid of features
+        feature_folds = []
+        for mins, maxes, d in zip(feature_mins, feature_maxes, density):
+            feature_folds.append(np.linspace(mins, maxes, d))
+        feature_combinations = np.array(np.meshgrid(*feature_folds)).T.reshape(-1, self.d)            
+        
+        
+        
+        # compute losses for each feature combination and each layer
+        min_losses = []
+        min_features_list = []
+        for loss_layer in loss_layers:
+            losses = []
+            for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"Loss Layer {loss_layer}"):
+                self.fold_vectors[loss_layer] = features
+                losses.append(self.score(X, y))
+                
+            # find the minimum loss and the features that produced it
+            losses = np.array(losses)
+            min_loss = np.min(losses)
+            min_index = np.argmin(losses)
+            min_losses.append(min_loss)
+            min_features_list.append(feature_combinations[min_index])
+            
+            # create a heatmap of the loss landscape for features f1id and f2id
+            if create_plot:
+                f1 = feature_combinations[:,f1id]
+                f2 = feature_combinations[:,f2id]
+                f1_folds = feature_folds[f1id]
+                f2_folds = feature_folds[f2id]
+                f1_name = self.feature_names[f1id] if self.feature_names is not None else f"Feature {f1id}"
+                f2_name = self.feature_names[f2id] if self.feature_names is not None else f"Feature {f2id}"
+                
+                # get just the losses where the two features are unique in feature_combinations
+                mesh = np.zeros((density[f2id], density[f1id]))
+                for i, f1_val in enumerate(f1_folds):
+                    for j, f2_val in enumerate(f2_folds):
+                        mesh[j,i] = losses[np.where((f1 == f1_val) & (f2 == f2_val))[0][0]]
+                
+                # plot input to layer
+                if create_plot:
+                    plt.figure(figsize=(12,6))
+                    offset = 1 if self.has_expand else 2
+                    paper = self.forward_pass(X)
+                    input = paper[offset + loss_layer]
+                    outx = paper[offset + loss_layer][:,0]
+                    outy = paper[offset + loss_layer][:,1]
+                    plt.subplot(121)
+                    plt.scatter(input[:,f1id], input[:,f2id], c=y, cmap="viridis")
+                    plt.xlabel(f1_name)
+                    plt.ylabel(f2_name)
+                    plt.title(f"Input to Layer {loss_layer}")
+                    self.draw_fold(self.fold_vectors[loss_layer], outx, outy, color="red", name="Predicted Fold")
+                    self.draw_fold(min_features_list[-1], outx, outy, color="black", name="Minimum Loss Fold")
+                    plt.legend()
+                
+                    # plot the heatmap
+                    plt.subplot(122)
+                    plt.pcolormesh(f1_folds, f2_folds, mesh, cmap=theme)
+                    # plt.scatter(np.where(f1_folds == f1[min_index])[0], np.where(f2_folds == f2[min_index])[0], color="red", label="Minimum Loss")
+                    plt.xlabel(f1_name)
+                    plt.ylabel(f2_name) 
+                    plt.title(f"Loss Landscape for Layer {loss_layer}")
+                    plt.colorbar()
+                    if png_path is not None:
+                        try:
+                            plt.savefig(png_path)
+                        except Exception as e:
+                            print(e)
+                            print(f"The path '{png_path}' is not valid")
+                    plt.tight_layout()
+                    plt.show()
+            
+        if len(min_losses) == 1:
+            return min_losses[0], min_features_list[0]
+        return min_losses, min_features_list
+        
+
+
+    def draw_fold(self, hyperplane, outx, outy, color, name):
+        """
+        This function draws a hyperplane on a plot
+        
+        Parameters:
+            hyperplane (list) - The hyperplane to draw
+            outx (list) - The x values of the data
+            outy (list) - The y values of the data
+            color (str) - The color of the hyperplane
+            name (str) - The name of the hyperplane
+        """
+        plane_domain = np.linspace(np.min(outx), np.max(outx), 100)
+        if hyperplane[1] == 0:
+            plt.plot([hyperplane[0], hyperplane[0]], [np.min(outy), np.max(outy)], color=color, lw=2, label=name)
+        elif hyperplane[0] == 0:
+            plt.plot([np.min(outx), np.max(outx)], [hyperplane[1], hyperplane[1]], color=color, lw=2, label=name)
+        else:
+            a, b = hyperplane
+            slope = -a / b
+            intercept = b - slope * a
+            plane_range = slope * plane_domain + intercept
+            # set values outside y range to NaN
+            plane_range = np.where((plane_range > np.min(outy)) & (plane_range < np.max(outy)), plane_range, np.nan)
+            plt.plot(plane_domain, plane_range, color=color, lw=2, label=name)
+
+
+
 
     def score(self, X:np.ndarray=None, y:np.ndarray=None):
         """
