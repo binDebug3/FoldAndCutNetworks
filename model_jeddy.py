@@ -1,6 +1,8 @@
 # Class dependencies
 import numpy as np
 from sklearn.metrics import accuracy_score
+from scipy.special import erf
+from scipy.stats import norm
 from tqdm import tqdm
 import pickle
 
@@ -129,7 +131,12 @@ class OrigamiNetwork():
         # Return the batches
         return batches
     
-
+    def gelu(self, x):
+        cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
+        return x * cdf
+    
+    def derivative_gelu(self, x):
+        return self.gelu(x) + np.dot(x, norm.pdf(x))
 
     def fold(self, Z, n):
         # Make the scaled inner product and the mask
@@ -138,25 +145,34 @@ class OrigamiNetwork():
         
         # Make the projection and flip the points that are beyond the fold (mask)
         projected = np.outer(scales, n)
-        return Z + 2 * indicator[:,np.newaxis] * (n - projected)
+        return Z + 2 * self.gelu(Z) * (n - projected)
     
     
     def derivative_fold(self, Z, n):
         # Get the scaled inner product, mask, and make the identity stack
+        p = np.dot(self.learning_rate * n, (Z - n).T)
+
         n_normal = n / np.dot(n,n)
+        
         scales = Z @ n_normal
-        mask = scales > 1
+
+        # mask = scales > 1
         identity = np.eye(self.width)
 
         # Use broadcasting to apply scales along the first axis
-        first_component = (1 - scales)[:, np.newaxis, np.newaxis] * identity
-        
+        #first_component = (1 - scales)[:, np.newaxis, np.newaxis] * identity
+        first_component = self.gelu(p) * np.dot((1 - scales), identity) + np.outer(n_normal, (2*(np.dot(n, Z) * n_normal - Z)))
+
         # Calculate the outer product of n and helper, then subtract the input
         outer_product = np.outer(2 * scales, n_normal) - Z
-        second_component = np.einsum('ij,k->ikj', outer_product, n_normal)
-        
+
+        #second_component = np.einsum('ij,k->ikj', outer_product, n_normal)
+
+        second_component = np.outer((1 - scales)*n, (self.learning_rate*(Z - 2*n).T * self.derivative_gelu(Z)))
+        #mask[:,np.newaxis, np.newaxis]
         # Return the derivative
-        return 2 * mask[:,np.newaxis, np.newaxis] * (first_component + second_component)
+        #print(np.shape(2 * self.gelu(p) * (first_component + second_component)))
+        return 2 * self.gelu(p) * (first_component + second_component)
     
     
     ############################## Training Calculations ##############################
@@ -184,7 +200,7 @@ class OrigamiNetwork():
             input = folded
         
         # make the final cut with the softmax
-        cut = input @ self.output_layer.T + self.b[np.newaxis,:]
+        cut = input @ self.output_layer.T #+ self.b[np.newaxis,:]
         exponential = np.exp(cut)
         softmax = exponential / np.sum(exponential, axis=1, keepdims=True)
         output.append(softmax)
@@ -230,7 +246,7 @@ class OrigamiNetwork():
         return gradient
         
     ########################## Optimization and Training Functions ############################
-    def gradient_descent(self):
+    def gradient_descent(self, verbose=0):
         """
         Perform gradient descent on the model
         Parameters:
@@ -239,41 +255,59 @@ class OrigamiNetwork():
             None
         """
         # Loop through and get the gradient
-        progress = tqdm(range(self.max_iter), desc="Training", leave=True)
+        progress = tqdm(total=self.max_iter, position=0, leave=True, desc="Training Progress", disable=verbose==0)
+        # for i in range(self.max_iter):
+        #     gradient = self.back_propagation(np.arange(self.n))
+            
+        #     # Clip any gradients that are too large
+        #     max_norm = 5.0
+        #     for g in gradient:
+        #         np.clip(g, -max_norm, max_norm, out=g)
+            
+        #     # Save the weights if regualarization is not 0
+        #     if self.reg != 0:
+        #         cut_reg = self.reg * self.output_layer
+        #         fold_reg = [self.reg * fold for fold in self.fold_vectors]
+        #         if self.has_expand:
+        #             expand_reg = self.reg * self.input_layer
+
+        #     # Update the weights of the cut matrix and the cut biases
+        #     self.output_layer -= self.learning_rate * gradient[0]
+
+        #     # Update the fold vectors
+        #     for i in range(self.layers):
+        #         self.fold_vectors[i] -= self.learning_rate * gradient[i+1]
+                
+        #     # Update the expand matrix if necessary
+        #     if self.has_expand:
+        #         self.input_layer -= self.learning_rate * gradient[-1]
+                
+        #     # Regularize the weights if it is not 0
+        #     if self.reg != 0:
+        #         self.output_layer -= cut_reg
+        #         for i in range(self.layers):
+        #             self.fold_vectors[i] -= fold_reg[i]
+        #         if self.has_expand:
+        #             self.input_layer -= expand_reg
+        #     progress.update(1)
+        # progress.close()
         for i in range(self.max_iter):
+            # Get the gradient
             gradient = self.back_propagation(np.arange(self.n))
             
             # Clip any gradients that are too large
             max_norm = 5.0
             for g in gradient:
                 np.clip(g, -max_norm, max_norm, out=g)
-            
-            # Save the weights if regualarization is not 0
-            if self.reg != 0:
-                cut_reg = self.reg * self.output_layer
-                fold_reg = [self.reg * fold for fold in self.fold_vectors]
-                if self.has_expand:
-                    expand_reg = self.reg * self.input_layer
 
             # Update the weights of the cut matrix and the cut biases
             self.output_layer -= self.learning_rate * gradient[0]
+            self.b -= self.learning_rate * gradient[1]
 
             # Update the fold vectors
             for i in range(self.layers):
-                self.fold_vectors[i] -= self.learning_rate * gradient[i+1]
-                
-            # Update the expand matrix if necessary
-            if self.has_expand:
-                self.input_layer -= self.learning_rate * gradient[-1]
-                
-            # Regularize the weights if it is not 0
-            if self.reg != 0:
-                self.output_layer -= cut_reg
-                for i in range(self.layers):
-                    self.fold_vectors[i] -= fold_reg[i]
-                if self.has_expand:
-                    self.input_layer -= expand_reg
-            progress.update(1)
+                self.fold_vectors[i] -= self.learning_rate * gradient[i+2]
+            progress.update()
         progress.close()
 
 
@@ -340,7 +374,7 @@ class OrigamiNetwork():
         loop.close()
 
 
-    def fit(self, X:np.ndarray, y:np.ndarray, X_val_set=None, y_val_set=None):
+    def fit(self, X:np.ndarray, y:np.ndarray, X_val_set=None, y_val_set=None, verbose=1):
         """
         Fit the model to the data
 
@@ -349,6 +383,7 @@ class OrigamiNetwork():
             y (n,) ndarray - The labels of the data
             X_val_set (n_val,d) ndarray - The validation set for the data
             y_val_set (n_val,) ndarray - The validation labels for the data
+            verbose (int) - Whether to show the progress of the training (default is 1)
         Returns:
             train_history (list) - A list of training accuracies
             val_history (list) - A list of validation accuracies
@@ -362,13 +397,14 @@ class OrigamiNetwork():
 
         # Initialize the expand matrix if necessary
         if self.has_expand:
-            self.input_layer = .1 * np.random.randn(self.width, self.d)
+            self.input_layer = self.he_init((self.d, self.width))
         else:
             self.width = self.d
-           
+        
         # Initialize the cut matrix, fold vectors, and b
-        self.output_layer = .1 * np.random.randn(self.num_classes, self.width + 1)
-        self.fold_vectors = .1 * np.random.randn(self.layers, self.width)
+        self.output_layer = self.he_init((self.num_classes, self.width))
+        self.fold_vectors = self.he_init((self.layers, self.width))
+        self.b = np.random.rand(self.num_classes)
 
         # If there is a validation set, save it
         if X_val_set is not None and y_val_set is not None:
@@ -378,9 +414,8 @@ class OrigamiNetwork():
         # Run the optimizer
         if self.optimizer == "sgd":
             raise ValueError("Stochastic Gradient Descent is not implemented yet")
-            self.stochastic_gradient_descent()
         elif self.optimizer == "grad":
-            self.gradient_descent()
+            self.gradient_descent(verbose=verbose)
 
         # Otherwise, raise an error
         else:
@@ -412,3 +447,251 @@ class OrigamiNetwork():
             return probabilities
         else:
             return predictions
+
+
+    # initialization method
+    def he_init(self, shape):
+        # Calculates the standard deviation
+        stddev = np.sqrt(2 / shape[0])
+        # Initializes weights from a normal distribution with mean 0 and calculated stddev
+        return np.random.normal(0, stddev, size=shape)
+
+
+    ############################## Helper Functions ###############################
+    def set_params(self, **kwargs):
+        """
+        Set the parameters of the model
+
+        Parameters:
+            **kwargs - The parameters to set
+        Returns:
+            None
+        """
+        # TODO: Test this function
+        for key, value in kwargs.items():
+            try:
+                setattr(self, key, value)
+            except Exception as e:
+                print(f"Could not set {key} to {value}. Error: {e}")
+    
+
+    def get_params(self):
+        """
+        Get the parameters of the model
+
+        Parameters:
+            None
+        Returns:
+            params (dict) - The parameters of the model
+        """
+        # TODO: Test this function
+        return self.__dict__
+    
+
+    def score(self, X:np.ndarray=None, y:np.ndarray=None):
+        """
+        Get the accuracy of the model on the data
+        
+        Parameters:
+            X (n,d) ndarray - The data to score the model on
+            y (n,) ndarray - The labels of the data
+        Returns:
+            accuracy (float) - The accuracy of the model on the data
+        """
+        # If the data is not provided, use the training data
+        if X is None:
+            X = self.X
+            y = self.y
+
+        # TODO: Test this function
+        # Get the predictions and return the accuracy
+        predictions = self.predict(X)
+        return accuracy_score(y, predictions)
+    
+
+    def cross_val_score(self, X:np.ndarray, y:np.ndarray, cv=5):
+        """
+        Get the cross validated accuracy of the model on the data
+        
+        Parameters:
+            X (n,d) ndarray - The data to score the model on
+            y (n,) ndarray - The labels of the data
+            cv (int) - The number of cross validation splits
+        Returns:
+            scores (list) - The accuracy of the model on the data for each split
+        """
+        #TODO: Test this function
+        # Split the data and initialize the scores
+        scores = []
+        for train_index, test_index in train_test_split(np.arange(X.shape[0]), test_size=1/cv):
+            X_train, X_test = X[train_index], X[test_index]
+            y_train, y_test = y[train_index], y[test_index]
+
+            # Fit the model and get the score
+            self.fit(X_train, y_train)
+            scores.append(self.score(X_test, y_test))
+        
+        # Return the scores
+        return scores
+    
+
+    def confusion_matrix(self, X:np.ndarray=None, y:np.ndarray=None):
+        """
+        Get the confusion matrix of the model on the data
+        
+        Parameters:
+            X (n,d) ndarray - The data to get the confusion matrix for
+            y (n,) ndarray - The labels of the data
+        Returns:
+            confusion_matrix (num_classes,num_classes) ndarray - The confusion matrix of the model
+        """
+        #TODO: Test this function
+        # If the data is not provided, use the training data
+        if X is None:
+            X = self.X
+            y = self.y
+
+        # Get the predictions and return the confusion matrix
+        predictions = self.predict(X)
+        return confusion_matrix(y, predictions, labels=self.classes)
+
+
+    ############################## Other Functions ###############################
+    def copy(self, deep=False):
+        """
+        Create a copy of the model
+
+        Parameters:
+            None
+        Returns:
+            new_model (model3 class) - A copy of the model
+        """
+        # Initialize a new model
+        new_model = OrigamiNetwork(max_iter=self.max_iter, tol=self.tol, 
+                                   learning_rate=self.learning_rate, reg=self.reg, 
+                                   optimizer=self.optimizer, batch_size=self.batch_size, 
+                                   epochs=self.epochs)
+        
+        # Copy the other attributes
+        if deep:
+            for param in self.__dict__:
+                value = self.__dict__[param]
+                if type(value) in [np.ndarray, list]:
+                    setattr(new_model, param, value.copy())
+                else:
+                    setattr(new_model, param, value)
+        return new_model
+    
+
+    def save_weights(self, file_path:str="origami_weights", save_type="standard"):
+        """
+        Save the weights of the model to a file so that it can be loaded later
+
+        Parameters:
+            file_path (str) - The name of the file to save the weights to
+            save_type (str) - How much of the model to save
+                "full" - Save the full model and all of its attributes
+                "standard" - Save the standard attributes of the model
+                "weights" - Save only the weights of the model
+        Returns:
+            None
+        """
+        # TODO: Test this function
+        if save_type not in ["full", "standard", "weights"]:
+            raise ValueError("save_type must be 'full', 'standard', or 'weights'")
+        
+        preferences = {"fold_vectors": self.fold_vectors,
+                       "input_layer": self.input_layer,
+                       "output_layer": self.output_layer,
+                       "b": self.b,
+                       "save_type": save_type}
+        if save_type == "standard":
+            standard_preferences = {
+                        "max_iter": self.max_iter, 
+                        "tol": self.tol, 
+                        "learning_rate": self.learning_rate,
+                        "optimizer": self.optimizer,
+                        "batch_size": self.batch_size,
+                        "epochs": self.epochs,
+                        "reg": self.reg,
+                        "layers": self.layers,
+                        "classes": self.classes,
+                        "num_classes": self.num_classes,
+                        "y_dict": self.y_dict,
+                        "one_hot": self.one_hot,
+                        "has_expand": self.has_expand,
+                        }
+            preferences.update(standard_preferences)
+        
+        if save_type == "full":
+            remaining_attributes = {"X": self.X,
+                                    "y": self.y,
+                                    "n": self.n,
+                                    "d": self.d,
+                                    "X_val_set": self.X_val_set,
+                                    "y_val_set": self.y_val_set,
+                                    "class_index": self.class_index,
+                                    "val_history": self.val_history,
+                                    "train_history": self.train_history,
+                                    "weights_history": self.weights_history,
+                                    }
+            preferences.update(remaining_attributes)
+
+        try:
+            if "." in file_path:
+                file_path = file_path.split(".")[0]
+            with open(f'{file_path}.pkl', 'wb') as f:
+                pickle.dump(preferences, f)
+        except Exception as e:
+            print(e)
+            raise ValueError(f"The file '{file_path}.pkl' could not be saved.")
+    
+
+    def load_weights(self, file_path):
+        """
+        Load the weights of the model from a file
+
+        Parameters:
+            file_path (str) - The name of the file to load the weights from
+        Returns:
+            None
+        """
+        # TODO: Test this function
+        try:
+            with open(f'{file_path}.pkl', 'rb') as f:
+                data = pickle.load(f)
+            save_type = data["save_type"]
+
+            self.fold_vectors = data["fold_vectors"]
+            self.input_layer = data["input_layer"]
+            self.output_layer = data["output_layer"]
+            self.b = data["b"]
+            
+            if save_type == "standard" or save_type == "full":
+                self.max_iter = data["max_iter"]
+                self.tol = data["tol"]
+                self.learning_rate = data["learning_rate"]
+                self.optimizer = data["optimizer"]
+                self.batch_size = data["batch_size"]
+                self.epochs = data["epochs"]
+                self.reg = data["reg"]
+                self.n = data["n"]
+                self.d = data["d"]
+                self.classes = data["classes"]
+                self.num_classes = data["num_classes"]
+                self.y_dict = data["y_dict"]
+                self.one_hot = data["one_hot"]
+                self.has_expand = data["has_expand"]
+            if save_type == "full":
+                self.X = data["X"]
+                self.y = data["y"]
+                self.X_val_set = data["X_val_set"]
+                self.y_val_set = data["y_val_set"]
+                self.class_index = data["class_index"]
+                self.val_history = data["val_history"]
+                self.train_history = data["train_history"]
+                self.weights_history = data["weights_history"]
+
+        except Exception as e:
+            print(e)
+            raise ValueError(f"The file '{file_path}.pkl' could not be loaded")
