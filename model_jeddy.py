@@ -19,7 +19,7 @@ from model import OrigamiNetwork
 
 
 class OrigamiNetwork():
-    def __init__(self, layers = 3, width = None, temp = .5, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=.5, optimizer="grad", batch_size=32, epochs=100):
+    def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, optimizer="grad", batch_size=32, epochs=100):
         # Hyperparameters
         self.max_iter = max_iter
         self.tol = tol
@@ -30,7 +30,6 @@ class OrigamiNetwork():
         self.reg = reg
         self.layers = layers
         self.width = width
-        self.temp = temp
 
         # Variables to store
         self.X = None
@@ -44,6 +43,7 @@ class OrigamiNetwork():
         self.fold_vectors = None
         self.output_layer = None
         self.input_layer = None
+        self.b = None
         
         # Check if the model has an expand matrix
         if self.width is not None:
@@ -130,6 +130,7 @@ class OrigamiNetwork():
         return batches
     
 
+
     def fold(self, Z, n):
         # Make the scaled inner product and the mask
         scales = (Z@n)/np.dot(n, n)
@@ -143,22 +144,23 @@ class OrigamiNetwork():
     def derivative_fold(self, Z, n):
         # Get the scaled inner product, mask, and make the identity stack
         n_normal = n / np.dot(n,n)
-        scales = Z@n_normal
-        indicator = scales > 1
+        scales = Z @ n_normal
+        mask = scales > 1
+        identity = np.eye(self.width)
 
         # Use broadcasting to apply scales along the first axis
-        first_component = (1 - scales)[:, np.newaxis, np.newaxis] * np.eye(self.width)
+        first_component = (1 - scales)[:, np.newaxis, np.newaxis] * identity
         
         # Calculate the outer product of n and helper, then subtract the input
         outer_product = np.outer(2 * scales, n_normal) - Z
         second_component = np.einsum('ij,k->ikj', outer_product, n_normal)
         
         # Return the derivative
-        return 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
+        return 2 * mask[:,np.newaxis, np.newaxis] * (first_component + second_component)
     
     
     ############################## Training Calculations ##############################
-    def forward_pass(self, D:np.ndarray, verbose=0):
+    def forward_pass(self, D:np.ndarray):
         """
         Perform a forward pass of the data through the model
 
@@ -181,13 +183,8 @@ class OrigamiNetwork():
             output.append(folded)
             input = folded
         
-        # add a column of ones and make the final cut with the softmax
-        cut = np.concatenate((input,np.ones((input.shape[0],1))), axis=1) @ self.output_layer.T
-        
-        # Normalize the cut and get the softmax
-        cut = (cut / np.max(np.abs(cut))) * self.temp * 200
-        if verbose:
-            print(cut)
+        # make the final cut with the softmax
+        cut = input @ self.output_layer.T + self.b[np.newaxis,:]
         exponential = np.exp(cut)
         softmax = exponential / np.sum(exponential, axis=1, keepdims=True)
         output.append(softmax)
@@ -212,33 +209,26 @@ class OrigamiNetwork():
         # Run the forward pass and get the softmax and outer layer
         forward = self.forward_pass(D)
         softmax = forward[-1]
-        outer_layer = -(one_hot - softmax) # flipped the sign
+        outer_layer = softmax - one_hot
         
-        # Append ones to the forward pass and calculuate the W gradient, appending to the list
-        second_stage_forward = np.concatenate((forward[-2],np.ones((forward[-2].shape[0],1))), axis=1)
-        dW = np.einsum('ik,id->kd', outer_layer, second_stage_forward)
+        # Make the b and W gradient and append them to the gradient
+        dW = np.einsum('ik,id->kd', outer_layer, forward[-2])
+        db = np.sum(outer_layer, axis=0)
         gradient.append(dW)
+        gradient.append(db)
         
         # Calculate the gradients of each fold using the forward propogation
-        start_index = 1 if self.has_expand else 0
-        fold_grads = [self.derivative_fold(forward[i + start_index], self.fold_vectors[i]) for i in range(self.layers)]
+        fold_grads = [self.derivative_fold(forward[i], self.fold_vectors[i]) for i in range(self.layers)]
         
         # Perform the back propogation for the folds
-        backprop_start = outer_layer @ self.output_layer[:,:-1]
+        backprop_start = outer_layer @ self.output_layer
+        # CHECK: backprop_start = outer_layer @ self.output_layer[:,:-1]
         for i in range(self.layers):
             backprop_start = np.einsum('ij,ijk->ik', backprop_start, fold_grads[-i-1])
             gradient.append(np.sum(backprop_start, axis=0))
             
-        # If there is an expand matrix, calculate the gradient for that
-        if self.has_expand:
-            dE = np.einsum('ik,id->kd', backprop_start, forward[0])
-            gradient.append(dE)
-            
-        # Return the gradient
         return gradient
         
-        
-    
     ########################## Optimization and Training Functions ############################
     def gradient_descent(self):
         """
@@ -285,6 +275,69 @@ class OrigamiNetwork():
                     self.input_layer -= expand_reg
             progress.update(1)
         progress.close()
+
+
+
+    def stochastic_gradient_descent(self, re_randomize=True):
+        """
+        Perform stochastic gradient descent on the model
+
+        Parameters:
+            re_randomize (bool) - Whether to re-randomize the batches after each epoch
+        Returns:
+            None
+        """
+        
+        # Raise an error if there are no epochs or batch size, or if batch size is greater than the number of points
+        if self.batch_size is None or self.epochs is None:
+            raise ValueError("Batch size or epochs must be specified")
+        if self.batch_size > self.n:
+            raise ValueError("Batch size must be less than the number of points")
+        
+        # Initialize the loop, get the batches, and go through the epochs
+        batches = self.randomize_batches()
+        loop = tqdm(total=self.epochs*len(batches), position=0)
+        self.update_differences(self.X, batches)
+        for epoch in range(self.epochs):
+
+            # reset the batches if re_randomize is true
+            if re_randomize and epoch > 0:
+                batches = self.randomize_batches()
+                self.update_differences(self.X, batches)
+            
+            # Loop through the different batches
+            loss_list = []
+            self.weights_history.append(self.weights.copy())
+            for i, batch in enumerate(batches):
+
+                # Get the gradient, update weights, and append the loss
+                gradient = self.gradient(self.weights, subset = batch, subset_num = i)
+                self.weights -= self.learning_rate * gradient
+                loss_list.append(self.loss(self.weights, subset = batch, subset_num = i))
+
+                # update our loop
+                loop.set_description('epoch:{}, loss:{:.4f}'.format(epoch,loss_list[-1]))
+                loop.update()
+
+            # If there is a validation set, check the validation error
+            if self.X_val_set is not None and self.y_val_set is not None:
+                
+                # Predict on the validation set and append the history
+                val_predictions = self.predict(self.X_val_set)
+                val_accuracy = accuracy_score(self.y_val_set, val_predictions)
+                self.val_history.append(val_accuracy)
+
+                # Predict on the training set and append the history
+                train_predictions = self.predict(self.X)
+                train_accuracy = accuracy_score(self.y, train_predictions)
+                self.train_history.append(train_accuracy)
+                
+                # Show the progress
+                # print(f"({epoch}) Val Accuracy: {np.round(val_accuracy,5)}.   Train Accuracy: {train_accuracy}")
+
+            # Append the history of the weights
+            self.weights_history.append(self.weights.copy())
+        loop.close()
 
 
     def fit(self, X:np.ndarray, y:np.ndarray, X_val_set=None, y_val_set=None):
