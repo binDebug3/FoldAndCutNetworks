@@ -5,9 +5,11 @@ from sklearn.model_selection import train_test_split
 import pickle
 from matplotlib import pyplot as plt
 import copy
+import pdb
 
 class OrigamiNetwork():
-    def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, optimizer="grad", batch_size=32, epochs=100):
+    def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, 
+                 optimizer="grad", batch_size=32, epochs=100, leak=0):
         # Hyperparameters
         self.max_iter = max_iter
         self.tol = tol
@@ -18,6 +20,7 @@ class OrigamiNetwork():
         self.reg = reg
         self.layers = layers
         self.width = width
+        self.leak = leak
 
         # Variables to store
         self.X = None
@@ -121,8 +124,19 @@ class OrigamiNetwork():
     
     
     
-    def fold(self, Z, n, leaky=0.):
-        # Make the scalled inner product and the mask
+    def fold(self, Z, n, leaky=None):
+        """
+        This function folds the data along the hyperplane defined by the normal vector n
+        
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+            leaky (float) - The amount of leak in the fold
+        Returns:
+            folded (n,d) ndarray - The folded data
+        """
+        # Make the scaled inner product and the mask
+        leaky = self.leak if leaky is None else leaky
         scales = (Z@n)/np.dot(n, n)
         indicator = scales > 1
         indicator = indicator.astype(int)
@@ -131,13 +145,37 @@ class OrigamiNetwork():
         # Make the projection and flip the points that are beyond the fold (mask)
         projected = np.outer(scales, n)
         folded = Z + 2 * indicator[:,np.newaxis] * (n - projected)
+        
+        
+        # # filter n-projected to only those whose indices are 1 in indicator
+        # plt.scatter(Z[:,0], Z[:,1], c=indicator)
+        # plt.plot([0, n[0]], [0, n[1]], color="black")
+        # plt.show()
+        # fold = 2 * indicator[:,np.newaxis] * (n - projected)
+        # # plot the fold with arrows from original position to new position
+        # plt.figure(figsize=(12,6))
+        # plt.scatter(Z[:,0], Z[:,1], c=indicator)
+        # for i in range(len(Z)):
+        #     plt.arrow(Z[i,0], Z[i,1], fold[i,0], fold[i,1], color="black", head_width=0.01)
+        # plt.plot([0, n[0]], [0, n[1]], color="black")
+        # plt.show()
+ 
         return folded
     
     
     
     def derivative_fold(self, Z, n, leaky=0.):
+        """
+        This function calculates the derivative of the fold operation
+        
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+            leaky (float) - The amount of leak in the fold
+        Returns:
+            derivative (n,d,d) ndarray - The derivative of the fold operation
+        """
         # Get the scaled inner product, mask, and make the identity stack
-        # NOTE: 
         quad_normal = n / np.dot(n, n)
         scales = Z @ quad_normal
         indicator = scales > 1
@@ -224,25 +262,22 @@ class OrigamiNetwork():
         gradient.append(db)
         
         # Calculate the gradients of each fold using the forward propogation
-        if freeze_folds:
-            raise NotImplementedError("Freezing the folds is not working right yet")
-            fold_grads = [np.zeros((self.n, self.d, self.d)) for i in range(self.layers)]
-        else:
+        if not freeze_folds:
             fold_grads = [self.derivative_fold(forward[i], self.fold_vectors[i]) for i in range(self.layers)]
         
-        # Perform the back propogation for the folds
-        backprop_start = outer_layer @ self.output_layer
-        # CHECK: backprop_start = outer_layer @ self.output_layer[:,:-1]
-        for i in range(self.layers):
-            backprop_start = np.einsum('ij,ijk->ik', backprop_start, fold_grads[-i-1])
-            gradient.append(np.sum(backprop_start, axis=0))
+            # Perform the back propogation for the folds
+            backprop_start = outer_layer @ self.output_layer
+            # CHECK: backprop_start = outer_layer @ self.output_layer[:,:-1]
+            for i in range(self.layers):
+                backprop_start = np.einsum('ij,ijk->ik', backprop_start, fold_grads[-i-1])
+                gradient.append(np.sum(backprop_start, axis=0))
             
         return gradient
         
         
     
     ########################## Optimization and Training Functions ############################
-    def gradient_descent(self, freeze_folds:bool=False, verbose=0):
+    def gradient_descent(self, freeze_folds:bool=False, maxiter=None, verbose=0):
         """
         Perform gradient descent on the model
         Parameters:
@@ -252,9 +287,11 @@ class OrigamiNetwork():
             fold_history (list) - A list of the fold vectors at each iteration
         """
         # show_iter = max(self.max_iter,100) // 100
-        progress = tqdm(total=self.max_iter, position=0, leave=True, desc="Training Progress", disable=verbose==0)
+        if maxiter is None:
+            maxiter = self.max_iter
+        progress = tqdm(total=maxiter, position=0, leave=True, desc="Training Progress", disable=verbose==0)
         fold_history = []
-        for i in range(self.max_iter):
+        for i in range(maxiter):
             # Get the gradient
             gradient = self.back_propagation(np.arange(self.n), freeze_folds=freeze_folds)
             
@@ -268,9 +305,10 @@ class OrigamiNetwork():
             self.b -= self.learning_rate * gradient[1]
 
             # Update the fold vectors
-            for i in range(self.layers):
-                self.fold_vectors[i] -= self.learning_rate * gradient[i+2]
-            fold_history.append(self.fold_vectors.copy())
+            if not freeze_folds:
+                for i in range(self.layers):
+                    self.fold_vectors[i] -= self.learning_rate * gradient[i+2]
+                fold_history.append(self.fold_vectors.copy())
             progress.update()
         progress.close()
         return fold_history
@@ -340,7 +378,7 @@ class OrigamiNetwork():
 
 
 
-    def fit(self, X:np.ndarray=None, y:np.ndarray=None, X_val_set=None, y_val_set=None, freeze_folds:bool=False, verbose=1):
+    def fit(self, X:np.ndarray=None, y:np.ndarray=None, X_val_set=None, y_val_set=None, freeze_folds:bool=False, maxiter=None, verbose=1):
         """
         Fit the model to the data
 
@@ -356,6 +394,8 @@ class OrigamiNetwork():
             val_history (list) - A list of validation accuracies
             fold_history (list) - A list of the fold vectors at each iteration
         """
+        if maxiter is None:
+            maxiter = self.max_iter
         if X is None and self.X is None:
             raise ValueError("X must be provided")
         if y is None and self.y is None:
@@ -374,10 +414,11 @@ class OrigamiNetwork():
         else:
             self.width = self.d
             
-        # Initialize the cut matrix, fold vectors, and b
-        self.output_layer = self.he_init((self.num_classes, self.width))
-        self.fold_vectors = self.he_init((self.layers, self.width))
-        self.b = np.random.rand(self.num_classes)
+        # Initialize the cut matrix, fold vectors, and biases
+        if not freeze_folds:
+            self.output_layer = self.he_init((self.num_classes, self.width))
+            self.fold_vectors = self.he_init((self.layers, self.width))
+            self.b = np.random.rand(self.num_classes)
 
         # If there is a validation set, save it
         if X_val_set is not None and y_val_set is not None:
@@ -388,7 +429,7 @@ class OrigamiNetwork():
         if self.optimizer == "sgd":
             raise ValueError("Stochastic Gradient Descent is not implemented yet")
         elif self.optimizer == "grad":
-            fold_history = self.gradient_descent(freeze_folds=freeze_folds, verbose=verbose)
+            fold_history = self.gradient_descent(freeze_folds=freeze_folds, maxiter=maxiter, verbose=verbose)
         # Otherwise, raise an error
         else:
             raise ValueError("Optimizer must be 'sgd' or 'grad'")
@@ -521,6 +562,7 @@ class OrigamiNetwork():
         feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
         score_layers = score_layers if type(score_layers) == list else [score_layers] if type(score_layers) == int else [l for l in range(self.layers)]
         og_fold_vectors = copy.deepcopy(self.fold_vectors)
+        og_output_layer = copy.deepcopy(self.output_layer)
 
         # input error handling
         assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
@@ -543,6 +585,8 @@ class OrigamiNetwork():
             scores = []
             for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
                 self.fold_vectors[score_layer] = features
+                self.output_layer = og_output_layer.copy()
+                self.fit(maxiter=10, freeze_folds=True, verbose=0)
                 scores.append(self.score(X, y))
                 
             # find the maximum score and the features that produced it
@@ -577,8 +621,12 @@ class OrigamiNetwork():
                 plt.figure(figsize=(12,6))
                 plt.subplot(121)
                 plt.scatter(outx, outy, c=y, cmap="viridis")
-                self.draw_fold(self.fold_vectors[score_layer], outx, outy, color="red", name="Predicted Fold")
-                self.draw_fold(max_features_list[-1], outx, outy, color="black", name="Maximum Score Fold")
+                pred_fold = self.fold_vectors[score_layer]
+                best_fold = max_features_list[-1]
+                pred_view = (round(pred_fold[f1id], 2), round(pred_fold[f2id], 2))
+                best_view = (round(best_fold[f1id], 2), round(best_fold[f2id], 2))
+                self.draw_fold(self.fold_vectors[score_layer], outx, outy, color="red", name=f"Predicted Fold {pred_view}")
+                self.draw_fold(max_features_list[-1], outx, outy, color="black", name=f"Maximum Score Fold {best_view}")
                 plt.xlabel(f1_name)
                 plt.ylabel(f2_name)
                 plt.title(f"Input to Layer {score_layer}")
@@ -602,13 +650,13 @@ class OrigamiNetwork():
                 plt.show()
             else:
                 self.fold_vectors = og_fold_vectors
+                self.output_layer = og_output_layer
         
             if learning:
-                raise NotImplementedError("Learning from the maximum score is not working yet")
                 # update weights with the best fold for this layer
                 self.fold_vectors[score_layer] = max_features_list[-1].copy()
                 # update input and output layers
-                self.fit(freeze_folds=True, verbose=0)
+                self.fit(freeze_folds=True, verbose=0, maxiter=50)
         
         if len(max_scores) == 1:
             return max_scores[0], max_features_list[0]
