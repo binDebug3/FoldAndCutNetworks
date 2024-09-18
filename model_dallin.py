@@ -6,6 +6,10 @@ import pickle
 from matplotlib import pyplot as plt
 import copy
 import pdb
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+from tqdm import tqdm
 
 class OrigamiNetwork():
     def __init__(self, layers = 3, width = None, max_iter=1000, tol=1e-8, learning_rate=0.01, reg=10, 
@@ -164,7 +168,7 @@ class OrigamiNetwork():
     
     
     
-    def derivative_fold(self, Z, n, leaky=0.):
+    def derivative_fold(self, Z, n, leaky=None):
         """
         This function calculates the derivative of the fold operation
         
@@ -175,6 +179,7 @@ class OrigamiNetwork():
         Returns:
             derivative (n,d,d) ndarray - The derivative of the fold operation
         """
+        leaky = self.leak if leaky is None else leaky
         # Get the scaled inner product, mask, and make the identity stack
         quad_normal = n / np.dot(n, n)
         scales = Z @ quad_normal
@@ -295,10 +300,19 @@ class OrigamiNetwork():
             # Get the gradient
             gradient = self.back_propagation(np.arange(self.n), freeze_folds=freeze_folds)
             
+            ipct = 20
+            grad_threshold = 5
+            rate_increase = 2
+            update_rate = max(ipct, maxiter // ipct)
+            if not freeze_folds and i % update_rate == 0:
+                avg_gradient = [np.mean(np.abs(g.ravel()), axis=0) for g in gradient]
+                if np.linalg.norm(avg_gradient) < grad_threshold:
+                    self.learning_rate *= rate_increase
+                
             # Clip any gradients that are too large
-            max_norm = 5.0
-            for g in gradient:
-                np.clip(g, -max_norm, max_norm, out=g)
+            # max_norm = 0.1 / self.learning_rate
+            # for g in gradient:
+            #     np.clip(g, -max_norm, max_norm, out=g)
 
             # Update the weights of the cut matrix and the cut biases
             self.output_layer -= self.learning_rate * gradient[0]
@@ -307,7 +321,7 @@ class OrigamiNetwork():
             # Update the fold vectors
             if not freeze_folds:
                 for i in range(self.layers):
-                    self.fold_vectors[i] -= self.learning_rate * gradient[i+2]
+                    self.fold_vectors[i] -= self.learning_rate * 2 * gradient[i+2]
                 fold_history.append(self.fold_vectors.copy())
             progress.update()
         progress.close()
@@ -417,7 +431,7 @@ class OrigamiNetwork():
         # Initialize the cut matrix, fold vectors, and biases
         if not freeze_folds:
             self.output_layer = self.he_init((self.num_classes, self.width))
-            self.fold_vectors = self.he_init((self.layers, self.width))
+            self.fold_vectors = [] if self.layers == 0 else self.he_init((self.layers, self.width))
             self.b = np.random.rand(self.num_classes)
 
         # If there is a validation set, save it
@@ -657,6 +671,8 @@ class OrigamiNetwork():
                 self.fold_vectors[score_layer] = max_features_list[-1].copy()
                 # update input and output layers
                 self.fit(freeze_folds=True, verbose=0, maxiter=50)
+                if max_scores[-1] >= 0.98:
+                    break
         
         if len(max_scores) == 1:
             return max_scores[0], max_features_list[0]
@@ -899,3 +915,202 @@ class OrigamiNetwork():
         except Exception as e:
             print(e)
             raise ValueError(f"The file '{file_path}.pkl' could not be loaded")
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def idraw_fold(self, hyperplane, outx, outy, color, name):
+        """
+        This function draws a hyperplane on a plot using Plotly
+        
+        Parameters:
+            hyperplane (list) - The hyperplane to draw
+            outx (list) - The x values of the data
+            outy (list) - The y values of the data
+            color (str) - The color of the hyperplane
+            name (str) - The name of the hyperplane
+        """
+        plane_domain = np.linspace(np.min(outx), np.max(outx), 100)
+        if hyperplane[1] == 0:
+            return go.Scatter(x=[hyperplane[0], hyperplane[0]], y=[np.min(outy), np.max(outy)], 
+                            mode="lines", line=dict(color=color, width=2), name=name)
+        elif hyperplane[0] == 0:
+            return go.Scatter(x=[np.min(outx), np.max(outx)], y=[hyperplane[1], hyperplane[1]], 
+                            mode="lines", line=dict(color=color, width=2), name=name)
+        else:
+            a, b = hyperplane
+            slope = -a / b
+            intercept = b - slope * a
+            plane_range = slope * plane_domain + intercept
+            # Keep values inside y range
+            plane_range = np.where((plane_range > np.min(outy)) & (plane_range < np.max(outy)), plane_range, np.nan)
+            return go.Scatter(x=plane_domain, y=plane_range, mode="lines", 
+                            line=dict(color=color, width=2), name=name)
+
+    def iscore_landscape(self, score_layers:int=None, X:np.ndarray=None, y:np.ndarray=None, 
+                       feature_mins:list=None, feature_maxes:list=None, density:int=10, 
+                       f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
+                       learning:bool=False, verbose:int=0):
+        """
+        This function visualizes the score landscape of the model for a given layer and two features.
+        
+        Parameters:
+            score_layers (int) - The layer to calculate the score landscape for
+            X (n,d) ndarray - The data to calculate the score landscape on
+            y (n,) ndarray - The labels of the data
+            feature_mins (list) - The minimum values for each feature
+            feature_maxes (list) - The maximum values for each feature
+            density (int) - The number of points to calculate the score for
+            f1id (int) - The id of the first feature to calculate the score for
+            f2id (int) - The id of the second feature to calculate the score for
+            create_plot (bool) - Whether to create a plot of the score landscape
+            png_path (str) - The path to save the plot to
+            theme (str) - The theme of the plot
+            learning (bool) - Whether to learn from the maximum score and features
+            verbose (int) - Whether to show the progress of the training (default is 1)
+        Returns:
+            max_score (float) - The maximum score of the model
+            max_features (list) - The features that produced the maximum score
+        """
+        # set default values
+        X = X if X is not None else self.X
+        y = y if y is not None else self.y
+        density = [density]*self.d if density is not None else [10]*self.d
+        feature_mins = feature_mins if feature_mins is not None else np.min(X, axis=0)
+        feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
+        score_layers = score_layers if type(score_layers) == list else [score_layers] if type(score_layers) == int else [l for l in range(self.layers)]
+        og_fold_vectors = copy.deepcopy(self.fold_vectors)
+        og_output_layer = copy.deepcopy(self.output_layer)
+
+        # input error handling
+        assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
+        assert type(y) == np.ndarray, f"y must be a numpy array. Instead got {type(y)}"
+        assert type(score_layers) == int or (type(score_layers) == list and len(score_layers) > 0 and type(score_layers[0]) == int), f"score_layer must be an integer. instead got {score_layers}"
+        assert type(density) == list or (len(density) > 0 and type(density[0]) == int), f"Density must be a list of integers. Instead got {density}"
+        
+        # create a grid of features
+        feature_folds = []
+        for mins, maxes, d in zip(feature_mins, feature_maxes, density):
+            feature_folds.append(np.linspace(mins, maxes, d))
+        feature_combinations = np.array(np.meshgrid(*feature_folds)).T.reshape(-1, self.d)            
+        
+        
+        
+        # compute scores for each feature combination and each layer
+        max_scores = []
+        max_features_list = []
+        for score_layer in score_layers:
+            scores = []
+            for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
+                self.fold_vectors[score_layer] = features
+                self.output_layer = og_output_layer.copy()
+                self.fit(maxiter=10, freeze_folds=True, verbose=0)
+                scores.append(self.score(X, y))
+                
+            # find the maximum score and the features that produced it
+            scores = np.array(scores)
+            max_score = np.max(scores)
+            max_index = np.argmax(scores)
+            max_scores.append(max_score)
+            max_features_list.append(feature_combinations[max_index])
+            
+            # create a heatmap of the score landscape for features f1id and f2id
+            if create_plot:
+                f1 = feature_combinations[:,f1id]
+                f2 = feature_combinations[:,f2id]
+                f1_folds = feature_folds[f1id]
+                f2_folds = feature_folds[f2id]
+
+                # Get the heatmap data
+                mesh = np.zeros((len(f2_folds), len(f1_folds)))
+                for i, f1_val in enumerate(f1_folds):
+                    for j, f2_val in enumerate(f2_folds):
+                        mesh[j, i] = scores[np.where((f1 == f1_val) & (f2 == f2_val))[0][0]]
+
+                offset = 1 if self.has_expand else 0
+                self.fold_vectors = og_fold_vectors.copy()
+                paper = self.forward_pass(X)
+                outx = paper[offset + score_layer][:,f1id]
+                outy = paper[offset + score_layer][:,f2id]
+
+                # Create subplots
+                fig = make_subplots(rows=1, cols=2, subplot_titles=(f"Input Data", f"Score Landscape"), 
+                                    specs=[[{"type": "scatter"}, {"type": "heatmap"}]])
+
+                # Scatter plot with colors
+                
+                fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', 
+                                        marker=dict(color=y.astype(int)*.5+0.2, colorscale=theme, size=8), 
+                                        name="Data", showlegend=False), row=1, col=1)
+
+                # Add predicted and maximum folds
+                pred_fold = self.fold_vectors[score_layer]
+                best_fold = max_features_list[-1]
+                fig.add_trace(self.idraw_fold(pred_fold, outx, outy, color="red", 
+                                        name=f"Predicted Fold ({round(pred_fold[f1id], 2)}, {round(pred_fold[f2id], 2)})"), row=1, col=1)
+                fig.add_trace(self.idraw_fold(best_fold, outx, outy, color="black", 
+                                        name=f"Maximum Score Fold ({round(best_fold[f1id], 2)}, {round(best_fold[f2id], 2)})"), row=1, col=1)
+
+                # Heatmap
+                fig.add_trace(go.Heatmap(z=mesh, x=f1_folds, y=f2_folds, colorscale=theme, zmin=np.min(mesh)*0.99, zmax=np.max(mesh)*1.01,), row=1, col=2)
+
+                # Point on the max score
+                max_index = np.unravel_index(np.argmax(mesh), mesh.shape)
+                max_x = f1_folds[max_index[1]]
+                max_y = f2_folds[max_index[0]]
+                fig.add_trace(go.Scatter(x=[max_x], y=[max_y], mode='markers', 
+                                        marker=dict(color='red', size=8), name=f"Max={round(max_score, 2)}", showlegend=False),
+                            row=1, col=2)
+
+                # Update layout
+                fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=1)
+                fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=1)
+                fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=2)
+                fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=2)
+
+                fig.update_layout(height=500, width=1000, 
+                                  title_text=f"Layer {score_layer} Visualization", 
+                                  showlegend=True, 
+                                  legend=dict(
+                                        x=0.5, 
+                                        y=-0.2,
+                                        xanchor="center",
+                                        yanchor="bottom" ))
+
+                # Save plot if png_path is provided
+                if png_path:
+                    fig.write_image(png_path)
+                fig.show()
+            else:
+                self.fold_vectors = og_fold_vectors
+                self.output_layer = og_output_layer
+        
+            if learning:
+                # update weights with the best fold for this layer
+                self.fold_vectors[score_layer] = max_features_list[-1].copy()
+                # update input and output layers
+                self.fit(freeze_folds=True, verbose=0, maxiter=50)
+                if max_scores[-1] >= 0.98:
+                    break
+        
+        if len(max_scores) == 1:
+            return max_scores[0], max_features_list[0]
+        return max_scores, max_features_list
+
