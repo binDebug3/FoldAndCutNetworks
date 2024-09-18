@@ -4,6 +4,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 import pickle
 from matplotlib import pyplot as plt
+from IPython import get_ipython
 import copy
 import pdb
 from numba import jit
@@ -283,7 +284,7 @@ class OrigamiNetwork():
             self.input_layer -= learning_rate * gradient[-1]
     
     
-    def gradient_descent(self):
+    def gradient_descent(self, validate):
         """
         Perform gradient descent on the model
         Parameters:
@@ -296,12 +297,51 @@ class OrigamiNetwork():
         for epoch in range(self.epochs):
             self.descend(np.arange(self.n), epoch)
             
-            loop.set_description(f"Epoch {epoch+1}/{self.epochs}")
+            # If there is a validation set, validate the model
+            if validate:
+                # preidct the validation set and get the accuracy
+                predictions = self.predict(self.X_val_set)
+                val_acc = accuracy_score(predictions, self.y_val_set)
+                self.val_history.append(val_acc)
+                
+                # Get the training accuracy and append it to the history
+                train_acc = accuracy_score(self.predict(self.X), self.y)
+                self.train_history.append(train_acc)
+                loop.set_description(f"Epoch {epoch+1}/{self.epochs} - Train Acc: {train_acc:.4f} - Val Acc: {val_acc:.4f}")
+            
+            else:
+                loop.set_description(f"Epoch {epoch+1}/{self.epochs}")
+                
+            # Update the loop
             loop.update(1)
         loop.close()
+        
+        # Set up the plot if you want it to validate
+        if validate:
+            # Set up the plot
+            fig, ax = plt.subplots()
+            train_line, = ax.plot([], [], label="Training Accuracy", color="blue")
+            val_line, = ax.plot([], [], label="Validation Accuracy", color="orange")
+            ax.set_xlim(0, self.epochs)
+            ax.set_ylim(0, 1)  # Accuracy values between 0 and 1
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Accuracy")
+            ax.set_yticks(np.arange(0, 1.1, .1))
+            ax.legend(loc="lower right")
+            ax.set_title(f"Opt: {self.optimizer} -- LR: {self.learning_rate} -- Reg: {self.reg} -- Width: {self.width}")
+            
+            # Set the data for the plot and show it
+            train_line.set_xdata(range(1, epoch + 2))
+            train_line.set_ydata(self.train_history)
+            val_line.set_xdata(range(1, epoch + 2))
+            val_line.set_ydata(self.val_history)
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+            plt.show()
             
     
-    def stochastic_gradient_descent(self):
+    def stochastic_gradient_descent(self, validate):
         """
         Perform stochastic gradient descent on the model
         Parameters:
@@ -309,6 +349,7 @@ class OrigamiNetwork():
         Returns:
             None
         """
+        
         # Loop through the epochs, get the batches, and update the loop
         loop = tqdm(total=self.epochs, position=0, leave=True)
         for epoch in range(self.epochs):
@@ -317,10 +358,50 @@ class OrigamiNetwork():
             # Loop through the batches and descend
             for batch in batches:
                 self.descend(batch, epoch)
+            
+            # If there is a validation set, validate the model
+            if validate:
+                # preidct the validation set and get the accuracy
+                predictions = self.predict(self.X_val_set)
+                val_acc = accuracy_score(predictions, self.y_val_set)
+                self.val_history.append(val_acc)
                 
-            loop.set_description(f"Epoch {epoch+1}/{self.epochs}")
+                # Get the training accuracy and append it to the history
+                train_acc = accuracy_score(self.predict(self.X), self.y)
+                self.train_history.append(train_acc)
+                loop.set_description(f"Epoch {epoch+1}/{self.epochs} - Train Acc: {train_acc:.4f} - Val Acc: {val_acc:.4f}")
+
+            # Otherwise, just update the loop with the epoch
+            else:
+                loop.set_description(f"Epoch {epoch+1}/{self.epochs}")
+            
+            # Update the loop
             loop.update(1)
         loop.close()
+        
+        # Set up the plot if you want it to validate
+        if validate:
+            # Set up the plot
+            fig, ax = plt.subplots()
+            train_line, = ax.plot([], [], label="Training Accuracy", color="blue")
+            val_line, = ax.plot([], [], label="Validation Accuracy", color="orange")
+            ax.set_xlim(0, self.epochs)
+            ax.set_ylim(0, 1)  # Accuracy values between 0 and 1
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Accuracy")
+            ax.set_yticks(np.arange(0, 1.1, .1))
+            ax.legend(loc="lower right")
+            ax.set_title("Opt: {self.optimizer} -- LR: {self.learning_rate} -- Reg: {self.reg} -- Width: {self.width}")
+            
+            # Set the data for the plot and show it
+            train_line.set_xdata(range(1, epoch + 2))
+            train_line.set_ydata(self.train_history)
+            val_line.set_xdata(range(1, epoch + 2))
+            val_line.set_ydata(self.val_history)
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+            plt.show()
                 
                 
     def adam(self):
@@ -366,9 +447,9 @@ class OrigamiNetwork():
 
         # Descent on the model
         if self.optimizer == "grad":
-            self.gradient_descent()
+            self.gradient_descent(self.validate)
         elif self.optimizer == "sgd":
-            self.stochastic_gradient_descent()
+            self.stochastic_gradient_descent(self.validate)
         elif self.optimizer == "adam":
             raise ValueError("'adam' not implemented yet")
             self.adam()
