@@ -237,7 +237,6 @@ class OrigamiNetwork():
         
         # make the final cut with the softmax
         cut = input @ self.output_layer.T + self.b[np.newaxis,:]
-        cut -= np.max(cut, axis=1, keepdims=True)
         exponential = np.exp(cut)
         softmax = exponential / np.sum(exponential, axis=1, keepdims=True)
         output.append(softmax)
