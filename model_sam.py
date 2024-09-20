@@ -18,7 +18,7 @@ from model import OrigamiNetwork
 """
 
 class OrigamiNetwork():
-    def __init__(self, layers = 3, width = None, learning_rate=0.01, reg=1, optimizer="grad", batch_size=32, epochs=100):
+    def __init__(self, layers = 3, width = None, learning_rate=0.01, reg=1, optimizer="grad", batch_size=32, epochs=100, crease = None):
         # Hyperparameters
         self.learning_rate = learning_rate
         self.optimizer = optimizer
@@ -27,6 +27,7 @@ class OrigamiNetwork():
         self.reg = reg
         self.layers = layers
         self.width = width
+        self.crease = crease
 
         # Variables to store
         self.X = None
@@ -147,17 +148,47 @@ class OrigamiNetwork():
         mask = scales > 1
         identity_stack = np.stack([np.eye(width) for _ in range(len(Z))])
         
-        # Calculate the first component and a helper term
+        # Calculate the first component, outer product, and the second component
         first_component = (1 - scales[:,np.newaxis, np.newaxis]) * identity_stack
-        helper = 2*Z @ n_normal
-        
-        # Calculate the outer product of n and helper, then subtract the input
-        outer_product = np.outer(helper, n_normal) - Z
+        outer_product = np.outer(2*Z @ n, n_normal) - Z
         second_component = np.einsum('ij,k->ikj', outer_product, n_normal)
         
         # Return the derivative
         return 2 * mask[:,np.newaxis, np.newaxis] * (first_component + second_component)
     
+    
+    def sig_fold(self, Z, n):
+        # Get the helpful terms to substitute into our fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = 1/(1 + np.exp(-p))
+        
+        # Make the projection and flip the points that are beyond the fold
+        projected = np.outer(1-scales, n)
+        return Z + 2* sigmoid[:,np.newaxis] * projected
+
+    def sig_derivative_fold(self, Z, n, width):
+        # Get the helpful terms to substitute into our derivative fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = (1/(1 + np.exp(-p)))[:,np.newaxis, np.newaxis]
+        u = n / n_dot_n
+        identity_stack = np.stack([np.eye(width) for _ in range(len(Z))])
+        one_minus_scales = 1 - scales[:,np.newaxis, np.newaxis]
+        
+        # Calculate the first component and the second, then combine them
+        first_component = one_minus_scales * identity_stack
+        second_component = np.einsum('ij,k->ikj', np.outer(2*Z@n, u) - Z, u)
+        first_half = 2 * sigmoid * (first_component + second_component)
+        
+        # Calculate the third component and the fourth, then combine them
+        sigmoid * (1-sigmoid) * self.crease * (Z - 2*n[np.newaxis,:])
+
+
     
     ############################## Training Calculations ##############################
     def learning_rate_decay(self, epoch, gradient):
