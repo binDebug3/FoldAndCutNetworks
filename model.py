@@ -16,14 +16,10 @@ from tqdm import tqdm
 class OrigamiNetwork():
     """Put in our final docstring here"""
     
-    
-    
-    
     ################################### Initialization ##################################
-    def __init__(self, layers:int=3, width:int=None, tol:float=1e-8, learning_rate:float=0.001, reg:float=10, 
+    def __init__(self, layers:int=3, width:int=None, learning_rate:float=0.001, reg:float=10, 
                  optimizer:str="grad", batch_size:int=32, epochs:int=100, leak:float=0, crease:float=1):
         # Hyperparameters
-        self.tol = tol
         self.learning_rate = learning_rate
         self.optimizer = optimizer
         self.batch_size = batch_size
@@ -987,7 +983,6 @@ class OrigamiNetwork():
         if save_type == "standard":
             standard_preferences = {
                         "epochs": self.epochs, 
-                        "tol": self.tol, 
                         "learning_rate": self.learning_rate,
                         "optimizer": self.optimizer,
                         "batch_size": self.batch_size,
@@ -1049,7 +1044,6 @@ class OrigamiNetwork():
             
             if save_type == "standard" or save_type == "full":
                 self.epochs = data["epochs"]
-                self.tol = data["tol"]
                 self.learning_rate = data["learning_rate"]
                 self.optimizer = data["optimizer"]
                 self.batch_size = data["batch_size"]
