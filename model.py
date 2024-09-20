@@ -482,7 +482,7 @@ class OrigamiNetwork():
             ax.set_ylabel("Accuracy")
             ax.set_yticks(np.arange(0, 1.1, .1))
             ax.legend(loc="lower right")
-            ax.set_title("Opt: {self.optimizer} -- LR: {self.learning_rate} -- Reg: {self.reg} -- Width: {self.width}")
+            ax.set_title(f"Opt: {self.optimizer} -- LR: {self.learning_rate} -- Reg: {self.reg} -- Width: {self.width}")
             
             # Set the data for the plot and show it
             x_data = np.arange(len(self.train_history))
@@ -535,7 +535,7 @@ class OrigamiNetwork():
 
         # Initialize the expand matrix if necessary
         if self.has_expand:
-            self.input_layer = self.he_init((self.d, self.width))
+            self.input_layer = self.he_init((self.width,self.d))
         else:
             self.width = self.d
             
