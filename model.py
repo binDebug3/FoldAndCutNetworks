@@ -17,7 +17,7 @@ class OrigamiNetwork():
     """Put in our final docstring here"""
     
     ################################### Initialization ##################################
-    def __init__(self, layers:int=3, width:int=None, learning_rate:float=0.001, reg:float=10, 
+    def __init__(self, layers:int=3, width:int=None, learning_rate:float=0.001, reg:float=10, sigmoid = False,
                  optimizer:str="grad", batch_size:int=32, epochs:int=100, leak:float=0, crease:float=1):
         # Hyperparameters
         self.learning_rate = learning_rate
@@ -29,6 +29,11 @@ class OrigamiNetwork():
         self.width = width
         self.leak = leak
         self.crease = crease
+        self.sigmoid = sigmoid
+        
+        # if the model is a sigmoid model, set the leak to 0
+        if self.sigmoid:
+            self.leak = 0
 
         # Variables to store
         self.X = None
@@ -230,11 +235,61 @@ class OrigamiNetwork():
         
         # Calculate the outer product of n and helper, then subtract the input
         outer_product = np.outer(2 * scales, n) - Z
-        second_component = np.einsum('ij,k->ikj', outer_product, quad_normal)
+        second_component = np.einsum('ij,k->ijk', outer_product, quad_normal)
         
         # Return the derivative
         derivative = 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
         return derivative
+    
+    
+    def sig_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
+        """
+        This function does a soft fold of the data along the hyperplane defined by the normal vector n
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+        Returns:
+            folded (n,d) ndarray - The folded data
+        """
+        # Get the helpful terms to substitute into our fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = 1/(1 + np.exp(-p))
+        
+        # Make the projection and flip the points that are beyond the fold
+        projected = np.outer(1-scales, n)
+        return Z + 2*sigmoid[:,np.newaxis] * projected
+
+
+    def sig_derivative_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
+        """
+        This function calculates the derivative of the soft fold operation
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+        Returns:
+            derivative (n,d,d) ndarray - The derivative of the fold operation
+        """
+        # Get the helpful terms to substitute into our derivative fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = (1/(1 + np.exp(-p)))[:,np.newaxis, np.newaxis]
+        u = n / n_dot_n
+        identity_stack = np.stack([np.eye(self.width) for _ in range(len(Z))])
+        one_minus_scales = 1 - scales[:,np.newaxis, np.newaxis]
+        
+        # Calculate the first component and the second, then combine them
+        first_component = one_minus_scales * identity_stack
+        second_component = np.einsum('ij,k->ijk', np.outer(2*Z@n, u) - Z, u)
+        first_half = 2 * sigmoid * (first_component + second_component)
+        
+        # Calculate the second half of the derivative
+        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,k->ijk', Z - 2*n[np.newaxis,:], n)
+        return first_half + second_half
 
 
     def forward_pass(self, D:np.ndarray) -> list:
@@ -258,9 +313,15 @@ class OrigamiNetwork():
             output = [D]
             input = D
         
+        # Get the correct fold function
+        if self.sigmoid:
+            fold = self.sig_fold
+        else:
+            fold = self.fold
+        
         # Loop through the different layers and fold the data
         for i in range(self.layers):
-            folded = self.fold(input, self.fold_vectors[i])
+            folded = fold(input, self.fold_vectors[i])
             output.append(folded)
             input = folded
         
@@ -300,10 +361,16 @@ class OrigamiNetwork():
         gradient.append(dW)
         gradient.append(db)
         
+        # Get the correct fold function
+        if self.sigmoid:
+            derivative = self.sig_derivative_fold
+        else:
+            derivative = self.derivative_fold
+        
         # Calculate the gradients of each fold using the forward propogation
         if not freeze_folds:
             start_index = 1 if self.has_expand else 0
-            fold_grads = [self.derivative_fold(forward[i+start_index], self.fold_vectors[i]) for i in range(self.layers)]
+            fold_grads = [derivative(forward[i+start_index], self.fold_vectors[i]) for i in range(self.layers)]
         
             # Perform the back propogation for the folds
             backprop_start = outer_layer @ self.output_layer
@@ -782,56 +849,6 @@ class OrigamiNetwork():
     
         
     ############################## Functions In Development ###############################
-    def sig_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
-        """
-        This function does a soft fold of the data along the hyperplane defined by the normal vector n
-        Parameters:
-            Z (n,d) ndarray - The data to fold
-            n (d,) ndarray - The normal vector of the hyperplane
-        Returns:
-            folded (n,d) ndarray - The folded data
-        """
-        # Get the helpful terms to substitute into our fold function
-        z_dot_x = (Z@n)
-        n_dot_n = np.dot(n, n)
-        scales = z_dot_x / n_dot_n
-        p = self.crease * (z_dot_x - n_dot_n)
-        sigmoid = 1/(1 + np.exp(-p))
-        
-        # Make the projection and flip the points that are beyond the fold
-        projected = np.outer(1-scales, n)
-        return Z + 2*sigmoid[:,np.newaxis] * projected
-
-
-    def sig_derivative_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
-        """
-        This function calculates the derivative of the soft fold operation
-        Parameters:
-            Z (n,d) ndarray - The data to fold
-            n (d,) ndarray - The normal vector of the hyperplane
-        Returns:
-            derivative (n,d,d) ndarray - The derivative of the fold operation
-        """
-        # Get the helpful terms to substitute into our derivative fold function
-        z_dot_x = (Z@n)
-        n_dot_n = np.dot(n, n)
-        scales = z_dot_x / n_dot_n
-        p = self.crease * (z_dot_x - n_dot_n)
-        sigmoid = (1/(1 + np.exp(-p)))[:,np.newaxis, np.newaxis]
-        u = n / n_dot_n
-        identity_stack = np.stack([np.eye(self.width) for _ in range(len(Z))])
-        one_minus_scales = 1 - scales[:,np.newaxis, np.newaxis]
-        
-        # Calculate the first component and the second, then combine them
-        first_component = one_minus_scales * identity_stack
-        second_component = np.einsum('ij,k->ikj', np.outer(2*Z@n, u) - Z, u)
-        first_half = 2 * sigmoid * (first_component + second_component)
-        
-        # Calculate the second half of the derivative
-        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
-        return first_half + second_half
-    
-    
     def set_params(self, **kwargs):
         """
         Set the parameters of the model
