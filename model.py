@@ -812,7 +812,6 @@ class OrigamiNetwork():
         Returns:
             derivative (n,d,d) ndarray - The derivative of the fold operation
         """
-        # TODO: clean up code
         # Get the helpful terms to substitute into our derivative fold function
         z_dot_x = (Z@n)
         n_dot_n = np.dot(n, n)
@@ -828,10 +827,9 @@ class OrigamiNetwork():
         second_component = np.einsum('ij,k->ikj', np.outer(2*Z@n, u) - Z, u)
         first_half = 2 * sigmoid * (first_component + second_component)
         
-        # Calculate the third component and the fourth, then combine them
-        sigmoid * (1-sigmoid) * self.crease * (Z - 2*n[np.newaxis,:])
-        # TODO: finish this function???
-    
+        # Calculate the second half of the derivative
+        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
+        return first_half + second_half
     
     
     def set_params(self, **kwargs):
