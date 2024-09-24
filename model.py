@@ -1,7 +1,9 @@
 import numpy as np
 from tqdm import tqdm
+from scipy.stats import norm
+from scipy.special import erf
 from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 import pickle
 from matplotlib import pyplot as plt
 import copy
@@ -10,6 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from tqdm import tqdm
+#from jax import import jacrev, jacfwd
+#import jax.numpy as jnp
 
 
 
@@ -185,6 +189,8 @@ class OrigamiNetwork():
         """
         # Make the scaled inner product and the mask
         leaky = self.leak if leaky is None else leaky
+        if np.dot(n, n) == 0:
+            n = n + 1e-5
         scales = (Z@n)/np.dot(n, n)
         indicator = scales > 1
         indicator = indicator.astype(int)
@@ -223,6 +229,8 @@ class OrigamiNetwork():
         """
         leaky = self.leak if leaky is None else leaky
         # Get the scaled inner product, mask, and make the identity stack
+        if np.dot(n, n) == 0:   
+            n = n + 1e-5
         quad_normal = n / np.dot(n, n)
         scales = Z @ quad_normal
         indicator = scales > 1
@@ -240,56 +248,6 @@ class OrigamiNetwork():
         # Return the derivative
         derivative = 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
         return derivative
-    
-    
-    def sig_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
-        """
-        This function does a soft fold of the data along the hyperplane defined by the normal vector n
-        Parameters:
-            Z (n,d) ndarray - The data to fold
-            n (d,) ndarray - The normal vector of the hyperplane
-        Returns:
-            folded (n,d) ndarray - The folded data
-        """
-        # Get the helpful terms to substitute into our fold function
-        z_dot_x = (Z@n)
-        n_dot_n = np.dot(n, n)
-        scales = z_dot_x / n_dot_n
-        p = self.crease * (z_dot_x - n_dot_n)
-        sigmoid = 1/(1 + np.exp(-p))
-        
-        # Make the projection and flip the points that are beyond the fold
-        projected = np.outer(1-scales, n)
-        return Z + 2*sigmoid[:,np.newaxis] * projected
-
-
-    def sig_derivative_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
-        """
-        This function calculates the derivative of the soft fold operation
-        Parameters:
-            Z (n,d) ndarray - The data to fold
-            n (d,) ndarray - The normal vector of the hyperplane
-        Returns:
-            derivative (n,d,d) ndarray - The derivative of the fold operation
-        """
-        # Get the helpful terms to substitute into our derivative fold function
-        z_dot_x = (Z@n)
-        n_dot_n = np.dot(n, n)
-        scales = z_dot_x / n_dot_n
-        p = self.crease * (z_dot_x - n_dot_n)
-        sigmoid = (1/(1 + np.exp(-p)))[:,np.newaxis, np.newaxis]
-        u = n / n_dot_n
-        identity_stack = np.stack([np.eye(self.width) for _ in range(len(Z))])
-        one_minus_scales = 1 - scales[:,np.newaxis, np.newaxis]
-        
-        # Calculate the first component and the second, then combine them
-        first_component = one_minus_scales * identity_stack
-        second_component = np.einsum('ij,k->ijk', np.outer(2*Z@n, u) - Z, u)
-        first_half = 2 * sigmoid * (first_component + second_component)
-        
-        # Calculate the second half of the derivative
-        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,k->ijk', Z - 2*n[np.newaxis,:], n)
-        return first_half + second_half
 
 
     def forward_pass(self, D:np.ndarray) -> list:
@@ -843,20 +801,18 @@ class OrigamiNetwork():
     
     
     
+    
+    
+    
+    
     ############################## Saving and Loading Functions ###########################
     
     
-    
-        
-    ############################## Functions In Development ###############################
     def set_params(self, **kwargs):
         """
         Set the parameters of the model
-
         Parameters:
             **kwargs - The parameters to set
-        Returns:
-            None
         """
         # TODO: Test this function
         for key, value in kwargs.items():
@@ -866,18 +822,48 @@ class OrigamiNetwork():
                 print(f"Could not set {key} to {value}. Error: {e}")
     
 
-    def get_params(self):
+    def get_params(self) -> dict:
         """
         Get the parameters of the model
-
-        Parameters:
-            None
         Returns:
             params (dict) - The parameters of the model
         """
-        # TODO: Test this function
-        return self.__dict__
+        params = self.__dict__.copy()
+        
+        # remove anything too big
+        pop_list = []
+        max_size = max(self.d, self.width, self.layers)
+        for attr in params:
+            val = params[attr]
+            if type(val) == np.ndarray or type(val) == list:
+                if type(val) == list:
+                    check = len(val[0]) if len(val) > 0 and (type(val[0]) == np.ndarray or type(val[0]) == list) else 1
+                    size = max(len(val), check)
+                else:
+                    size = val.shape[0] * val.shape[1] if len(val.shape) > 1 else val.shape[0]
+                if size > max_size:
+                    pop_list.append(attr)
+        for attr in pop_list:
+            params.pop(attr, None)
+        return params
     
+    
+    
+    def get_history(self, history:str=None):
+        """
+        Get the history of the model
+        Parameters:
+            history (str) - The history to get
+        Returns:
+            history (list) - The history of the model
+        """
+        libary = ["train", "val", "fold", "learning_rate"]
+        if history is None:
+            return self.train_history, self.val_history, self.fold_history, self.learning_rate_history
+        elif history.lower() in libary:
+            return getattr(self, f"{history}_history")
+    
+
 
     def score(self, X:np.ndarray=None, y:np.ndarray=None):
         """
@@ -894,37 +880,39 @@ class OrigamiNetwork():
             X = self.X
             y = self.y
 
-        # TODO: Test this function
         # Get the predictions and return the accuracy
         predictions = self.predict(X)
         return accuracy_score(y, predictions)
     
+    
 
-    def cross_val_score(self, X:np.ndarray, y:np.ndarray, cv=5):
+    def cross_val_score(self, X: np.ndarray = None, y: np.ndarray = None, cv=5) -> list:
         """
-        Get the cross validated accuracy of the model on the data
-        
+        Get the cross-validated accuracy of the model on the data.
+
         Parameters:
             X (n,d) ndarray - The data to score the model on
             y (n,) ndarray - The labels of the data
-            cv (int) - The number of cross validation splits
+            cv (int) - The number of cross-validation splits
         Returns:
             scores (list) - The accuracy of the model on the data for each split
         """
-        #TODO: Test this function
-        # Split the data and initialize the scores
+        X = self.X if X is None else X
+        y = self.y if y is None else y
+        
+        # Initialize the k-fold cross-validation
+        kf = KFold(n_splits=cv)
         scores = []
-        for train_index, test_index in train_test_split(np.arange(X.shape[0]), test_size=1/cv):
+        for train_index, test_index in kf.split(X):
             X_train, X_test = X[train_index], X[test_index]
             y_train, y_test = y[train_index], y[test_index]
 
-            # Fit the model and get the score
+            # Fit the model on the training data and get the score on the test data
             self.fit(X_train, y_train)
             scores.append(self.score(X_test, y_test))
-        
-        # Return the scores
         return scores
     
+
 
     def confusion_matrix(self, X:np.ndarray=None, y:np.ndarray=None):
         """
@@ -936,18 +924,16 @@ class OrigamiNetwork():
         Returns:
             confusion_matrix (num_classes,num_classes) ndarray - The confusion matrix of the model
         """
-        #TODO: Test this function
         # If the data is not provided, use the training data
-        if X is None:
-            X = self.X
-            y = self.y
+        X = self.X if X is None else X
+        y = self.y if y is None else y
 
         # Get the predictions and return the confusion matrix
         predictions = self.predict(X)
         return confusion_matrix(y, predictions, labels=self.classes)
 
 
-    ############################## Outdated Functions ###############################
+
     def copy(self, deep=False):
         """
         Create a copy of the model
@@ -957,36 +943,28 @@ class OrigamiNetwork():
         Returns:
             new_model (model3 class) - A copy of the model
         """
-        raise Warning("This function is outdated. Please update this method with all current attributes.")
         # Initialize a new model
         new_model = OrigamiNetwork()
         
         # Copy the other attributes
-        if deep:
-            for param in self.__dict__:
-                value = self.__dict__[param]
-                if type(value) in [np.ndarray, list]:
-                    setattr(new_model, param, value.copy())
-                else:
-                    setattr(new_model, param, value)
+        param_list = self.__dict__.copy() if deep else self.get_params()
+        for param in param_list:
+            setattr(new_model, param, param_list[param])
         return new_model
     
 
-    def save_weights(self, file_path:str="origami_weights", save_type="standard"):
+
+    def save_weights(self, file_path:str="origami_weights", save_type:str="standard", verbose:int=0):
         """
         Save the weights of the model to a file so that it can be loaded later
-
         Parameters:
             file_path (str) - The name of the file to save the weights to
             save_type (str) - How much of the model to save
                 "full" - Save the full model and all of its attributes
                 "standard" - Save the standard attributes of the model
                 "weights" - Save only the weights of the model
-        Returns:
-            None
+            verbose (int) - Whether to show the result success
         """
-        raise Warning("This function is outdated. Please update this method with all current attributes.")
-        # TODO: Test this function
         if save_type not in ["full", "standard", "weights"]:
             raise ValueError("save_type must be 'full', 'standard', or 'weights'")
         
@@ -996,35 +974,10 @@ class OrigamiNetwork():
                        "b": self.b,
                        "save_type": save_type}
         if save_type == "standard":
-            standard_preferences = {
-                        "epochs": self.epochs, 
-                        "learning_rate": self.learning_rate,
-                        "optimizer": self.optimizer,
-                        "batch_size": self.batch_size,
-                        "epochs": self.epochs,
-                        "reg": self.reg,
-                        "layers": self.layers,
-                        "classes": self.classes,
-                        "num_classes": self.num_classes,
-                        "y_dict": self.y_dict,
-                        "one_hot": self.one_hot,
-                        "has_expand": self.has_expand,
-                        }
-            preferences.update(standard_preferences)
+            preferences.update(self.get_params())
         
         if save_type == "full":
-            remaining_attributes = {"X": self.X,
-                                    "y": self.y,
-                                    "n": self.n,
-                                    "d": self.d,
-                                    "X_val_set": self.X_val_set,
-                                    "y_val_set": self.y_val_set,
-                                    "class_index": self.class_index,
-                                    "val_history": self.val_history,
-                                    "train_history": self.train_history,
-                                    "weights_history": self.weights_history,
-                                    }
-            preferences.update(remaining_attributes)
+            preferences.update(self.__dict__)
 
         try:
             if "." in file_path:
@@ -1034,217 +987,92 @@ class OrigamiNetwork():
         except Exception as e:
             print(e)
             raise ValueError(f"The file '{file_path}.pkl' could not be saved.")
+        if verbose > 0:
+            print(f"The weights were saved to '{file_path}.pkl'")
+    
     
 
-    def load_weights(self, file_path):
+    def load_weights(self, file_path:str="origami_weights", verbose:int=0):
         """
         Load the weights of the model from a file
-
         Parameters:
             file_path (str) - The name of the file to load the weights from
-        Returns:
-            None
+            verbose (int) - Whether to show the result success
         """
-        raise Warning("This function is outdated. Please update this method with all current attributes.")
-        # TODO: Test this function
         try:
             with open(f'{file_path}.pkl', 'rb') as f:
                 data = pickle.load(f)
-            save_type = data["save_type"]
 
-            self.fold_vectors = data["fold_vectors"]
-            self.input_layer = data["input_layer"]
-            self.output_layer = data["output_layer"]
-            self.b = data["b"]
+            for key, value in data.items():
+                try:
+                    setattr(self, key, value)
+                except Exception as e:
+                    print(f"Could not set {key} to {value}.\nError: {e}")
             
-            if save_type == "standard" or save_type == "full":
-                self.epochs = data["epochs"]
-                self.learning_rate = data["learning_rate"]
-                self.optimizer = data["optimizer"]
-                self.batch_size = data["batch_size"]
-                self.epochs = data["epochs"]
-                self.reg = data["reg"]
-                self.n = data["n"]
-                self.d = data["d"]
-                self.classes = data["classes"]
-                self.num_classes = data["num_classes"]
-                self.y_dict = data["y_dict"]
-                self.one_hot = data["one_hot"]
-                self.has_expand = data["has_expand"]
-            if save_type == "full":
-                self.X = data["X"]
-                self.y = data["y"]
-                self.X_val_set = data["X_val_set"]
-                self.y_val_set = data["y_val_set"]
-                self.class_index = data["class_index"]
-                self.val_history = data["val_history"]
-                self.train_history = data["train_history"]
-                self.weights_history = data["weights_history"]
-
+            if verbose > 0:
+                print(f"The weights were loaded from '{file_path}.pkl'")
         except Exception as e:
             print(e)
             raise ValueError(f"The file '{file_path}.pkl' could not be loaded")
+    
+    
         
-        
-    def draw_fold(self, hyperplane, outx, outy, color, name):
+    ############################## Functions In Development ###############################
+    def sig_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
         """
-        This function draws a hyperplane on a plot
-        
+        This function does a soft fold of the data along the hyperplane defined by the normal vector n
         Parameters:
-            hyperplane (list) - The hyperplane to draw
-            outx (list) - The x values of the data
-            outy (list) - The y values of the data
-            color (str) - The color of the hyperplane
-            name (str) - The name of the hyperplane
-        """
-        raise DeprecationWarning("This function is deprecated. Use idraw_fold instead. Delete this method after 10/1/24")
-        plane_domain = np.linspace(np.min(outx), np.max(outx), 100)
-        if hyperplane[1] == 0:
-            plt.plot([hyperplane[0], hyperplane[0]], [np.min(outy), np.max(outy)], color=color, lw=2, label=name)
-        elif hyperplane[0] == 0:
-            plt.plot([np.min(outx), np.max(outx)], [hyperplane[1], hyperplane[1]], color=color, lw=2, label=name)
-        else:
-            a, b = hyperplane
-            slope = -a / b
-            intercept = b - slope * a
-            plane_range = slope * plane_domain + intercept
-            # set values outside y range to NaN
-            plane_range = np.where((plane_range > np.min(outy)) & (plane_range < np.max(outy)), plane_range, np.nan)
-            plt.plot(plane_domain, plane_range, color=color, lw=2, label=name)
-
-
-    def score_landscape(self, score_layers:int=None, X:np.ndarray=None, y:np.ndarray=None, 
-                       feature_mins:list=None, feature_maxes:list=None, density:int=10, 
-                       f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
-                       learning:bool=False, verbose:int=0):
-        """
-        This function visualizes the score landscape of the model for a given layer and two features.
-        
-        Parameters:
-            score_layers (int) - The layer to calculate the score landscape for
-            X (n,d) ndarray - The data to calculate the score landscape on
-            y (n,) ndarray - The labels of the data
-            feature_mins (list) - The minimum values for each feature
-            feature_maxes (list) - The maximum values for each feature
-            density (int) - The number of points to calculate the score for
-            f1id (int) - The id of the first feature to calculate the score for
-            f2id (int) - The id of the second feature to calculate the score for
-            create_plot (bool) - Whether to create a plot of the score landscape
-            png_path (str) - The path to save the plot to
-            theme (str) - The theme of the plot
-            learning (bool) - Whether to learn from the maximum score and features
-            verbose (int) - Whether to show the progress of the training (default is 1)
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
         Returns:
-            max_score (float) - The maximum score of the model
-            max_features (list) - The features that produced the maximum score
+            folded (n,d) ndarray - The folded data
         """
-        raise DeprecationWarning("This function is deprecated. Use iscore_landscape instead. Delete this method after 10/1/24")
-        # set default values
-        X = X if X is not None else self.X
-        y = y if y is not None else self.y
-        density = [density]*self.d if density is not None else [10]*self.d
-        feature_mins = feature_mins if feature_mins is not None else np.min(X, axis=0)
-        feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
-        score_layers = score_layers if type(score_layers) == list else [score_layers] if type(score_layers) == int else [l for l in range(self.layers)]
-        og_fold_vectors = copy.deepcopy(self.fold_vectors)
-        og_output_layer = copy.deepcopy(self.output_layer)
+        # Get the helpful terms to substitute into our fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = 1/(1 + np.exp(-p))
+        
+        # Make the projection and flip the points that are beyond the fold
+        projected = np.outer(1-scales, n)
+        return Z + 2*sigmoid[:,np.newaxis] * projected
 
-        # input error handling
-        assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
-        assert type(y) == np.ndarray, f"y must be a numpy array. Instead got {type(y)}"
-        assert type(score_layers) == int or (type(score_layers) == list and len(score_layers) > 0 and type(score_layers[0]) == int), f"score_layer must be an integer. instead got {score_layers}"
-        assert type(density) == list or (len(density) > 0 and type(density[0]) == int), f"Density must be a list of integers. Instead got {density}"
-        
-        # create a grid of features
-        feature_folds = []
-        for mins, maxes, d in zip(feature_mins, feature_maxes, density):
-            feature_folds.append(np.linspace(mins, maxes, d))
-        feature_combinations = np.array(np.meshgrid(*feature_folds)).T.reshape(-1, self.d)            
-        
-        
-        
-        # compute scores for each feature combination and each layer
-        max_scores = []
-        max_features_list = []
-        for score_layer in score_layers:
-            scores = []
-            for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
-                self.fold_vectors[score_layer] = features
-                self.output_layer = og_output_layer.copy()
-                self.fit(epochs=10, freeze_folds=True, verbose=0)
-                scores.append(self.score(X, y))
-                
-            # find the maximum score and the features that produced it
-            scores = np.array(scores)
-            max_score = np.max(scores)
-            max_index = np.argmax(scores)
-            max_scores.append(max_score)
-            max_features_list.append(feature_combinations[max_index])
-            
-            # create a heatmap of the score landscape for features f1id and f2id
-            if create_plot:
-                f1 = feature_combinations[:,f1id]
-                f2 = feature_combinations[:,f2id]
-                f1_folds = feature_folds[f1id]
-                f2_folds = feature_folds[f2id]
-                f1_name = self.feature_names[f1id] if self.feature_names is not None else f"Feature {f1id}"
-                f2_name = self.feature_names[f2id] if self.feature_names is not None else f"Feature {f2id}"
-                
-                # get just the scores where the two features are unique in feature_combinations
-                mesh = np.zeros((density[f2id], density[f1id]))
-                for i, f1_val in enumerate(f1_folds):
-                    for j, f2_val in enumerate(f2_folds):
-                        mesh[j,i] = scores[np.where((f1 == f1_val) & (f2 == f2_val))[0][0]]
-                
-                offset = 1 if self.has_expand else 0
-                self.fold_vectors = og_fold_vectors.copy()
-                paper = self.forward_pass(X)
-                outx = paper[offset + score_layer][:,f1id]
-                outy = paper[offset + score_layer][:,f2id]
 
-                # plot input to layer
-                plt.figure(figsize=(12,6))
-                plt.subplot(121)
-                plt.scatter(outx, outy, c=y, cmap="viridis")
-                pred_fold = self.fold_vectors[score_layer]
-                best_fold = max_features_list[-1]
-                pred_view = (round(pred_fold[f1id], 2), round(pred_fold[f2id], 2))
-                best_view = (round(best_fold[f1id], 2), round(best_fold[f2id], 2))
-                self.draw_fold(self.fold_vectors[score_layer], outx, outy, color="red", name=f"Predicted Fold {pred_view}")
-                self.draw_fold(max_features_list[-1], outx, outy, color="black", name=f"Maximum Score Fold {best_view}")
-                plt.xlabel(f1_name)
-                plt.ylabel(f2_name)
-                plt.title(f"Input to Layer {score_layer}")
-                plt.legend()
-            
-                # plot the heatmap
-                plt.subplot(122)
-                plt.pcolormesh(f1_folds, f2_folds, mesh, cmap=theme)
-                # plt.scatter(np.where(f1_folds == f1[max_index])[0], np.where(f2_folds == f2[max_index])[0], color="red", label="maximum score")
-                plt.xlabel(f1_name)
-                plt.ylabel(f2_name) 
-                plt.title(f"Score Landscape for Layer {score_layer}")
-                plt.colorbar()
-                if png_path is not None:
-                    try:
-                        plt.savefig(png_path)
-                    except Exception as e:
-                        print(e)
-                        print(f"The path '{png_path}' is not valid")
-                plt.tight_layout()
-                plt.show()
-            else:
-                self.fold_vectors = og_fold_vectors
-                self.output_layer = og_output_layer
+    def sig_derivative_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
+        """
+        This function calculates the derivative of the soft fold operation
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+        Returns:
+            derivative (n,d,d) ndarray - The derivative of the fold operation
+        """
+        # Get the helpful terms to substitute into our derivative fold function
+        z_dot_x = (Z@n)
+        n_dot_n = np.dot(n, n)
+        scales = z_dot_x / n_dot_n
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = (1/(1 + np.exp(-p)))[:,np.newaxis, np.newaxis]
+        u = n / n_dot_n
+        identity_stack = np.stack([np.eye(self.width) for _ in range(len(Z))])
+        one_minus_scales = 1 - scales[:,np.newaxis, np.newaxis]
         
-            if learning:
-                # update weights with the best fold for this layer
-                self.fold_vectors[score_layer] = max_features_list[-1].copy()
-                # update input and output layers
-                self.fit(freeze_folds=True, verbose=0, epochs=50)
-                if max_scores[-1] >= 0.98:
-                    break
+        # Calculate the first component and the second, then combine them
+        first_component = one_minus_scales * identity_stack
+        second_component = np.einsum('ij,k->ikj', np.outer(2*Z@n, u) - Z, u)
+        first_half = 2 * sigmoid * (first_component + second_component)
         
-        if len(max_scores) == 1:
-            return max_scores[0], max_features_list[0]
-        return max_scores, max_features_list
+        # Calculate the second half of the derivative
+        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
+        return first_half + second_half
+
+
+    #possible use of activation functions in the fold derivative fold
+    def gelu(self, x):
+        cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
+        return x * cdf
+
+    def derivative_gelu(self, x):
+         return self.gelu(x) + np.dot(x, norm.pdf(x))
+
