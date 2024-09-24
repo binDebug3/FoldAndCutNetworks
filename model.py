@@ -1,5 +1,7 @@
 import numpy as np
 from tqdm import tqdm
+from scipy.stats import norm
+from scipy.special import erf
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split, KFold
 import pickle
@@ -10,6 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from tqdm import tqdm
+#from jax import import jacrev, jacfwd
+#import jax.numpy as jnp
 
 
 
@@ -239,6 +243,12 @@ class OrigamiNetwork():
         # Return the derivative
         derivative = 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
         return derivative
+
+    # def auto_diff_derivative_fold(self, Z:np.ndarray, n:np.ndarraym leaky:float=None) -> jnp.ndarray:
+    #     Z = jnp.asarray(Z)
+    #     n = jnp.asarray(n)
+    #     return jacrev(self.fold, argnums = 1)(Z, n)
+
 
 
     def forward_pass(self, D:np.ndarray) -> list:
@@ -1045,4 +1055,13 @@ class OrigamiNetwork():
         # Calculate the second half of the derivative
         second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
         return first_half + second_half
+
+
+    #possible use of activation functions in the fold derivative fold
+    def gelu(self, x):
+        cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
+        return x * cdf
+
+    def derivative_gelu(self, x):
+         return self.gelu(x) + np.dot(x, norm.pdf(x))
 
