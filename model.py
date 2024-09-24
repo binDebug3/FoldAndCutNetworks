@@ -12,8 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from tqdm import tqdm
-#from jax import import jacrev, jacfwd
-#import jax.numpy as jnp
+from jax import jacrev, jacfwd
+import jax.numpy as jnp
 
 
 
@@ -214,6 +214,20 @@ class OrigamiNetwork():
         # plt.plot([0, n[0]], [0, n[1]], color="black")
         # plt.show()
         return folded
+
+    def auto_diff_fold(self, Z:np.ndarray, n:np.ndarray, leaky:float=None) -> jnp.ndarray:
+        """
+        This function calculates the derivative of the fold operation
+        using jax autodifferentiation
+        
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+            leaky (float) - The amount of leak in the fold
+        Returns:
+            derivative (n,d,d) jndarray - The derivative of the fold operation as a jax tensor
+        """
+        return jacrev(self.fold, argnums=1)(Z, n)
     
     
     def derivative_fold(self, Z:np.ndarray, n:np.ndarray, leaky:float=None) -> np.ndarray:
@@ -1072,7 +1086,4 @@ class OrigamiNetwork():
     def gelu(self, x):
         cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
         return x * cdf
-
-    def derivative_gelu(self, x):
-         return self.gelu(x) + np.dot(x, norm.pdf(x))
 
