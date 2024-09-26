@@ -1,5 +1,7 @@
 import numpy as np
 from tqdm import tqdm
+from scipy.stats import norm
+from scipy.special import erf
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split, KFold
 import pickle
@@ -10,6 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from tqdm import tqdm
+from jax import jacrev, jacfwd
+import jax.numpy as jnp
 
 
 
@@ -17,7 +21,7 @@ class OrigamiNetwork():
     """Put in our final docstring here"""
     
     ################################### Initialization ##################################
-    def __init__(self, layers:int=3, width:int=None, learning_rate:float=0.001, reg:float=10, 
+    def __init__(self, layers:int=3, width:int=None, learning_rate:float=0.001, reg:float=10, sigmoid = False,
                  optimizer:str="grad", batch_size:int=32, epochs:int=100, leak:float=0, crease:float=1):
         # Hyperparameters
         self.learning_rate = learning_rate
@@ -29,6 +33,11 @@ class OrigamiNetwork():
         self.width = width
         self.leak = leak
         self.crease = crease
+        self.sigmoid = sigmoid
+        
+        # if the model is a sigmoid model, set the leak to 0
+        if self.sigmoid:
+            self.leak = 0
 
         # Variables to store
         self.X = None
@@ -205,6 +214,20 @@ class OrigamiNetwork():
         # plt.plot([0, n[0]], [0, n[1]], color="black")
         # plt.show()
         return folded
+
+    def auto_diff_fold(self, Z:np.ndarray, n:np.ndarray, leaky:float=None) -> jnp.ndarray:
+        """
+        This function calculates the derivative of the fold operation
+        using jax autodifferentiation
+        
+        Parameters:
+            Z (n,d) ndarray - The data to fold
+            n (d,) ndarray - The normal vector of the hyperplane
+            leaky (float) - The amount of leak in the fold
+        Returns:
+            derivative (n,d,d) jndarray - The derivative of the fold operation as a jax tensor
+        """
+        return jacrev(self.fold, argnums=1)(Z, n)
     
     
     def derivative_fold(self, Z:np.ndarray, n:np.ndarray, leaky:float=None) -> np.ndarray:
@@ -234,7 +257,7 @@ class OrigamiNetwork():
         
         # Calculate the outer product of n and helper, then subtract the input
         outer_product = np.outer(2 * scales, n) - Z
-        second_component = np.einsum('ij,k->ikj', outer_product, quad_normal)
+        second_component = np.einsum('ij,k->ijk', outer_product, quad_normal)
         
         # Return the derivative
         derivative = 2 * indicator[:,np.newaxis, np.newaxis] * (first_component + second_component)
@@ -262,9 +285,15 @@ class OrigamiNetwork():
             output = [D]
             input = D
         
+        # Get the correct fold function
+        if self.sigmoid:
+            fold = self.sig_fold
+        else:
+            fold = self.fold
+        
         # Loop through the different layers and fold the data
         for i in range(self.layers):
-            folded = self.fold(input, self.fold_vectors[i])
+            folded = fold(input, self.fold_vectors[i])
             output.append(folded)
             input = folded
         
@@ -304,10 +333,16 @@ class OrigamiNetwork():
         gradient.append(dW)
         gradient.append(db)
         
+        # Get the correct fold function
+        if self.sigmoid:
+            derivative = self.sig_derivative_fold
+        else:
+            derivative = self.derivative_fold
+        
         # Calculate the gradients of each fold using the forward propogation
         if not freeze_folds:
             start_index = 1 if self.has_expand else 0
-            fold_grads = [self.derivative_fold(forward[i+start_index], self.fold_vectors[i]) for i in range(self.layers)]
+            fold_grads = [derivative(forward[i+start_index], self.fold_vectors[i]) for i in range(self.layers)]
         
             # Perform the back propogation for the folds
             backprop_start = outer_layer @ self.output_layer
@@ -1045,4 +1080,10 @@ class OrigamiNetwork():
         # Calculate the second half of the derivative
         second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
         return first_half + second_half
+
+
+    #possible use of activation functions in the fold derivative fold
+    def gelu(self, x):
+        cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
+        return x * cdf
 

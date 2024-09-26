@@ -1,19 +1,21 @@
-import numpy as np
 from tqdm import tqdm
-from scipy.stats import norm
-from scipy.special import erf
-from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.model_selection import train_test_split, KFold
-import pickle
-from matplotlib import pyplot as plt
 import copy
 import pdb
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import pickle
+
 import numpy as np
-from tqdm import tqdm
 from jax import jacrev, jacfwd
 import jax.numpy as jnp
+
+from scipy.special import erf
+from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import KFold
+
+from matplotlib import pyplot as plt
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+
 
 
 
@@ -68,6 +70,8 @@ class OrigamiNetwork():
         self.val_history = []
         self.train_history = []
         self.fold_history = []
+        self.cut_history = []
+        self.expand_history = []
         self.learning_rate_history = []    
 
 
@@ -215,6 +219,7 @@ class OrigamiNetwork():
         # plt.show()
         return folded
 
+
     def auto_diff_fold(self, Z:np.ndarray, n:np.ndarray, leaky:float=None) -> jnp.ndarray:
         """
         This function calculates the derivative of the fold operation
@@ -334,10 +339,7 @@ class OrigamiNetwork():
         gradient.append(db)
         
         # Get the correct fold function
-        if self.sigmoid:
-            derivative = self.sig_derivative_fold
-        else:
-            derivative = self.derivative_fold
+        derivative = self.derivative_fold if not self.sigmoid else self.sig_derivative_fold
         
         # Calculate the gradients of each fold using the forward propogation
         if not freeze_folds:
@@ -376,6 +378,7 @@ class OrigamiNetwork():
         # Update the weights of the cut matrix and the cut biases
         self.output_layer -=  learning_rate * gradient[0]
         self.b -= learning_rate * gradient[1]
+        self.cut_history.append([self.output_layer.copy(), self.b.copy()])
 
         # Update the fold vectors
         if not freeze_folds:
@@ -386,6 +389,7 @@ class OrigamiNetwork():
         # Update the expand matrix if necessary
         if self.has_expand:
             self.input_layer -= learning_rate * gradient[-1]
+            self.expand_history.append(self.input_layer.copy())
         
         # Return  the gradient
         return gradient
@@ -596,13 +600,13 @@ class OrigamiNetwork():
             self.adam()
         else:
             raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
-        return self.train_history, self.val_history, self.fold_history
+        return self.get_history()
         
         
         
         
     ############################## Evaluation Functions #############################
-    def predict(self, points:np.ndarray, show_probabilities=False):
+    def predict(self, points:np.ndarray=None, show_probabilities=False):
         """
         Predict the labels of the data
 
@@ -613,19 +617,16 @@ class OrigamiNetwork():
             predictions (n,) ndarray - The predicted labels of the data
         """
         # Get the probabilities of the classes
+        points = self.X if points is None else points
         probabilities = self.forward_pass(points)[-1]
-        
-        # Get the predictions
-        predictions = np.argmax(probabilities, axis=1)
-        
-        # Get the dictionary of the predictions
-        predictions = np.array([self.classes[prediction] for prediction in predictions])
-        
-        # Return the predictions
         if show_probabilities:
             return probabilities
-        else:
-            return predictions
+        
+        else:        
+            # Get the predictions
+            predictions = np.argmax(probabilities, axis=1)
+            # Get the dictionary of the predictions
+            return np.array([self.classes[prediction] for prediction in predictions])
     
         
         
@@ -636,7 +637,193 @@ class OrigamiNetwork():
     
     
     ############################## Visualitzation Functions ###############################
-    def idraw_fold(self, hyperplane, outx, outy, color, name):
+
+    def plot_history(self, X:np.ndarray=None, Y:np.ndarray=None, 
+                    n_folds:int=50, resolution:float=0.02, include_cut:bool=True) -> None:
+        """
+        Plot the decision boundaries of a model as lines.
+
+        Parameters:
+            X (n,2) ndarray: The input data used to define the range of the plot (only works in 2D).
+            y (n,) ndarray: The true labels of the data (for plotting the points).
+            n_folds (int): The number of folds to plot.
+            resolution (float): The resolution of the grid for plotting the decision boundary.
+            include_cut (bool): Whether to include the cut layer in the plot.
+        """
+        # initialize input
+        X = self.X if X is None else X
+        Y = self.y if Y is None else Y
+        mod_number = self.epochs // n_folds
+        scalor = 1 / (2 * self.epochs / mod_number)
+        
+        # get pure colors for color scale
+        length = 255
+        cmap = [plt.get_cmap('spring')(i) for i in range(0, length, length//n_folds)]
+        cmap = np.array([np.array(cmap[i][:-1])*length for i in range(n_folds)], dtype=int)
+        colors = ['#%02x%02x%02x' % tuple(cmap[i]) for i in range(n_folds)]
+
+        # set up grid
+        if include_cut:
+            x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+            y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+            xx, yy = np.meshgrid(np.arange(x_min, x_max, resolution),
+                                np.arange(y_min, y_max, resolution))
+            grid_points = np.c_[xx.ravel(), yy.ravel()]
+            og_output_layer = copy.deepcopy(self.output_layer)
+            og_b_thing = copy.deepcopy(self.b)
+            
+        """# Setup subplots grid (2 columns, dynamic number of rows based on layers)
+        n_rows = (self.layers + 1) // 2
+        fig = make_subplots(rows=n_rows, cols=2, subplot_titles=[f"Layer {i+1}" for i in range(self.layers)])
+
+        # Loop over each layer and fold
+        out = self.forward_pass(X)
+        progress = tqdm(total=n_folds*self.layers, desc="Plotting")
+        for fold_idx in range(self.layers):
+            outx = out[fold_idx][:, 0]
+            outy = out[fold_idx][:, 1]
+            subplot_idx = fold_idx + 1
+            row_idx = (subplot_idx + 1) // 2
+            col_idx = (subplot_idx % 2)
+            
+            # Plot every mod_number fold and decision boundary
+            for hist_idx in range(0, self.epochs, mod_number):
+                color_idx = hist_idx // mod_number
+                fold = self.fold_history[hist_idx][fold_idx]
+                hyperplane_plot = self.idraw_fold(fold, outx, outy, color=colors[color_idx])
+
+                # Add hyperplane plot to the subplot
+                # fig.add_trace(hyperplane_plot, row=row_idx, col=col_idx)
+                
+                if include_cut:
+                    self.output_layer = self.cut_history[hist_idx][0]
+                    self.b = self.cut_history[hist_idx][1]
+                    Z = self.predict(grid_points)
+                    Z = Z.reshape(xx.shape)
+                    
+                    # Add decision boundary as contour lines (approximated with scatter plot)
+                    boundary_trace = go.Contour(x=np.arange(x_min, x_max, resolution), 
+                                                y=np.arange(y_min, y_max, resolution),
+                                                z=Z, showscale=False,
+                                                # contours_coloring='lines', 
+                                                colorscale='Viridis', opacity=1)
+                    fig.add_trace(boundary_trace, row=row_idx, col=col_idx)
+                # set xlim and ylim
+                fig.update_xaxes(range=[np.min(outx), np.max(outx)], row=row_idx, col=col_idx)
+                progress.update(1)
+                break
+        progress.close()
+
+        # Reset the output layer and bias term
+        self.output_layer = og_output_layer.copy()
+        self.b = og_b_thing.copy()
+        hyperplane = np.round(self.fold_vectors[-1], 2)
+        last_plot_col = 1 if self.layers % 2 == 0 else 2
+        
+        if include_cut:
+            # Z = self.predict(grid_points)
+            # Z = Z.reshape(xx.shape)
+            # boundary_trace = go.Contour(x=np.arange(x_min, x_max, resolution), 
+            #                             y=np.arange(y_min, y_max, resolution),
+            #                             z=Z, showscale=False,
+            #                             line_smoothing=0.85,
+            #                             colorscale='Greys', opacity=0.5)
+            # fig.add_trace(boundary_trace, row=n_rows, col=last_plot_col)
+            pass
+        outx = out[-2][:,0]
+        outy = out[-2][:,1]
+        fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', marker=dict(color=Y)), 
+                      row=n_rows, col=last_plot_col)
+        fig.update_layout(height=500 * n_rows, width=1000, title="Decision Boundaries and Hyperplanes", showlegend=False)
+        fig.show()"""
+
+        # loop over each fold
+        out = self.forward_pass(X)
+        plt.figure(figsize=(8, 3.5*self.layers), dpi=150)
+        n_cols = 2
+        n_rows = self.layers // n_cols + 1
+        for layer in range(self.layers):
+            outx = out[layer][:,0]
+            outy = out[layer][:,1]
+            progress = tqdm(total=n_folds, desc=f"Plotting Layer {layer+1}")
+            
+            # plot every mod_number fold and decision boundary
+            plt.subplot(n_rows, n_cols, layer+1)
+            for step in range(0, len(self.fold_history), mod_number):
+                color_idx = step // mod_number
+                self.draw_fold(self.fold_history[step][layer], outx, outy, color=colors[color_idx], name=None)
+                if include_cut:
+                    self.output_layer = self.cut_history[step][0]
+                    self.b = self.cut_history[step][1]
+                    Z = self.predict(grid_points)
+                    Z = Z.reshape(xx.shape)
+                    plt.contourf(xx, yy, Z, alpha=scalor*color_idx, cmap=plt.cm.YlGnBu)
+                progress.update(1)
+            plt.ylim(np.min(outy), np.max(outy))
+            plt.xlim(np.min(outx), np.max(outx)) 
+            plt.tick_params(axis='both', which='major', labelsize=6)
+            hyperplane = np.round(self.fold_vectors[layer], 2)
+            plt.title(f"Layer {layer+1}: {hyperplane}", fontsize=8)
+            if layer % n_cols == 0:
+                plt.ylabel("Feature 2", fontsize=6)
+            if layer >= n_cols * (n_rows - 1):
+                plt.xlabel("Feature 1", fontsize=6)
+            progress.close()
+
+        # reset the output layer and b
+        self.output_layer = og_output_layer.copy()
+        self.b = og_b_thing.copy()
+        
+        # plot the final decision boundary
+        plt.subplot(n_rows, n_cols, n_rows*n_cols)
+        if include_cut:
+            Z = self.predict(grid_points)
+            Z = Z.reshape(xx.shape)
+            plt.contourf(xx, yy, Z, alpha=0.5, cmap=plt.cm.Greens)
+        # plot the points
+        outx = out[-2][:,0]
+        outy = out[-2][:,1]
+        plt.scatter(outx, outy, c=Y)
+        plt.ylim(np.min(outy), np.max(outy))
+        plt.xlim(np.min(outx), np.max(outx))
+        plt.title(f"Layer {layer+1}: {hyperplane}")
+        plt.xlabel("Feature 1", fontsize=6)
+        plt.title("Final Decision Boundary", fontsize=8)
+        plt.tick_params(axis='both', which='major', labelsize=6)
+        plt.tight_layout()
+        plt.show()
+        
+    
+    
+    
+    def draw_fold(self, hyperplane, outx, outy, color, name):
+        """
+        This function draws a hyperplane on a plot
+        
+        Parameters:
+            hyperplane (list) - The hyperplane to draw
+            outx (list) - The x values of the data
+            outy (list) - The y values of the data
+            color (str) - The color of the hyperplane
+            name (str) - The name of the hyperplane
+        """
+        plane_domain = np.linspace(np.min(outx), np.max(outx), 100)
+        if hyperplane[1] == 0:
+            plt.plot([hyperplane[0], hyperplane[0]], [np.min(outy), np.max(outy)], color=color, lw=2, label=name)
+        elif hyperplane[0] == 0:
+            plt.plot([np.min(outx), np.max(outx)], [hyperplane[1], hyperplane[1]], color=color, lw=2, label=name)
+        else:
+            a, b = hyperplane
+            slope = -a / b
+            intercept = b - slope * a
+            plane_range = slope * plane_domain + intercept
+            # set values outside y range to NaN
+            plane_range = np.where((plane_range > np.min(outy)) & (plane_range < np.max(outy)), plane_range, np.nan)
+            plt.plot(plane_domain, plane_range, color=color, lw=2, label=name)
+    
+    
+    
+    def idraw_fold(self, hyperplane, outx, outy, color, name=None):
         """
         This function draws a hyperplane on a plot using Plotly
         
@@ -699,6 +886,7 @@ class OrigamiNetwork():
         score_layers = score_layers if type(score_layers) == list else [score_layers] if type(score_layers) == int else [l for l in range(self.layers)]
         og_fold_vectors = copy.deepcopy(self.fold_vectors)
         og_output_layer = copy.deepcopy(self.output_layer)
+        og_b = copy.deepcopy(self.b)
 
         # input error handling
         assert type(X) == np.ndarray and X.shape[0] > 0 and X.shape[1] > 0, f"X must be a 2D numpy array. Instead got {type(X)}"
@@ -720,7 +908,7 @@ class OrigamiNetwork():
             for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
                 self.fold_vectors[score_layer] = features
                 self.output_layer = og_output_layer.copy()
-                self.fit(epochs=10, freeze_folds=True, verbose=0)
+                self.fit(epochs=50, freeze_folds=True, verbose=0)
                 scores.append(self.score(X, y))
                 
             # find the maximum score and the features that produced it
@@ -800,6 +988,7 @@ class OrigamiNetwork():
             else:
                 self.fold_vectors = og_fold_vectors
                 self.output_layer = og_output_layer
+                self.b = og_b
         
             if learning:
                 # update weights with the best fold for this layer
@@ -872,9 +1061,9 @@ class OrigamiNetwork():
         Returns:
             history (list) - The history of the model
         """
-        libary = ["train", "val", "fold", "learning_rate"]
+        libary = ["train", "val", "fold", "cut", "expand", "learning_rate"]
         if history is None:
-            return self.train_history, self.val_history, self.fold_history, self.learning_rate_history
+            return self.train_history, self.val_history, self.fold_history, self.cut_history, self.expand_history, self.learning_rate_history
         elif history.lower() in libary:
             return getattr(self, f"{history}_history")
     
@@ -1083,8 +1272,16 @@ class OrigamiNetwork():
         return first_half + second_half
 
 
-    #possible use of activation functions in the fold derivative fold
-    def gelu(self, x):
+    # possible use of activation functions in the fold derivative fold
+    def gelu(self, x:np.ndarray) -> np.ndarray:
+        """
+        This function calculates the Gaussian Error Linear Unit of the input 
+        It is an alternative to the ReLU activation function that is differentiable at zero
+        Parameters:
+            x (n,) ndarray - The input to the activation function
+        Returns:
+            y (n,) ndarray - The output of the activation function
+        """
         cdf = 0.5 * (1.0 + erf(x / np.sqrt(2)))
         return x * cdf
 
