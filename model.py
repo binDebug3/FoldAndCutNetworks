@@ -584,6 +584,8 @@ class OrigamiNetwork():
                 raise ValueError("Output layer must be initialized")
         if not freeze_folds:
             self.fold_vectors = [] if self.layers == 0 else self.he_init((self.layers, self.width))
+            self.fold_vectors = np.array([[0, .5]])
+            print("setting fold vectors to ", self.fold_vectors)
 
         # If there is a validation set, save it
         if X_val_set is not None and y_val_set is not None:
@@ -908,7 +910,7 @@ class OrigamiNetwork():
             for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
                 self.fold_vectors[score_layer] = features
                 self.output_layer = og_output_layer.copy()
-                self.fit(epochs=50, freeze_folds=True, verbose=0)
+                # self.fit(epochs=50, freeze_folds=True, verbose=0)
                 scores.append(self.score(X, y))
                 
             # find the maximum score and the features that produced it
