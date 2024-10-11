@@ -376,7 +376,7 @@ class OrigamiNetwork():
         if not freeze_folds:
             for i in range(self.layers):
                 self.fold_vectors[i] -= learning_rate * gradient[i+2]
-            self.fold_history.append(self.fold_vectors.copy())
+        self.fold_history.append(self.fold_vectors.copy())
             
         # Update the expand matrix if necessary
         if self.has_expand:
