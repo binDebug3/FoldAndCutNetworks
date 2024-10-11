@@ -57,10 +57,7 @@ class OrigamiNetwork():
         self.b = None
         
         # Check if the model has an expand matrix
-        if self.width is not None:
-            self.has_expand = True
-        else:
-            self.has_expand = False
+        self.has_expand = self.width is not None
 
         # Validation variables
         self.validate = False
@@ -195,7 +192,12 @@ class OrigamiNetwork():
         leaky = self.leak if leaky is None else leaky
         if np.dot(n, n) == 0:
             n = n + 1e-5
-        scales = (Z@n)/np.dot(n, n)
+        try:
+            scales = (Z@n)/np.dot(n, n)
+        except ValueError:
+            print("Z shape:", Z.shape)
+            print("n shape:", n.shape)
+            print("n@n:", type(np.dot(n, n)))
         indicator = scales > 1
         indicator = indicator.astype(int)
         indicator = indicator + (1 - indicator) * leaky
@@ -203,20 +205,6 @@ class OrigamiNetwork():
         # Make the projection and flip the points that are beyond the fold (mask)
         projected = np.outer(scales, n)
         folded = Z + 2 * indicator[:,np.newaxis] * (n - projected)
-        
-        
-        # # filter n-projected to only those whose indices are 1 in indicator
-        # plt.scatter(Z[:,0], Z[:,1], c=indicator)
-        # plt.plot([0, n[0]], [0, n[1]], color="black")
-        # plt.show()
-        # fold = 2 * indicator[:,np.newaxis] * (n - projected)
-        # # plot the fold with arrows from original position to new position
-        # plt.figure(figsize=(12,6))
-        # plt.scatter(Z[:,0], Z[:,1], c=indicator)
-        # for i in range(len(Z)):
-        #     plt.arrow(Z[i,0], Z[i,1], fold[i,0], fold[i,1], color="black", head_width=0.01)
-        # plt.plot([0, n[0]], [0, n[1]], color="black")
-        # plt.show()
         return folded
 
 
@@ -312,13 +300,14 @@ class OrigamiNetwork():
         return output
     
     
-    def back_propagation(self, indices:np.ndarray, freeze_folds:bool=False) -> list:
+    def back_propagation(self, indices:np.ndarray, freeze_folds:bool=False, freeze_cut:bool=False) -> list:
         """
         Perform a back propagation of the data through the model
 
         Parameters:
             indices (ndarray) - The indices of the data to back propagate
             freeze_folds (bool) - Whether to freeze the folds during back propogation
+            freeze_cut (bool) - Whether to freeze the cut during back propogation
         Returns:
             gradient list - The gradient of the model (ndarrays)
         """
@@ -333,16 +322,17 @@ class OrigamiNetwork():
         outer_layer = softmax - one_hot
         
         # Make the b and W gradient and append them to the gradient
-        dW = np.einsum('ik,id->kd', outer_layer, forward[-2])
-        db = np.sum(outer_layer, axis=0)
-        gradient.append(dW)
-        gradient.append(db)
+        if not freeze_cut:
+            dW = np.einsum('ik,id->kd', outer_layer, forward[-2])
+            db = np.sum(outer_layer, axis=0)
+            gradient.append(dW)
+            gradient.append(db)
         
-        # Get the correct fold function
-        derivative = self.derivative_fold if not self.sigmoid else self.sig_derivative_fold
         
         # Calculate the gradients of each fold using the forward propogation
         if not freeze_folds:
+            # Get the correct fold function
+            derivative = self.derivative_fold if not self.sigmoid else self.sig_derivative_fold
             start_index = 1 if self.has_expand else 0
             fold_grads = [derivative(forward[i+start_index], self.fold_vectors[i]) for i in range(self.layers)]
         
@@ -363,21 +353,23 @@ class OrigamiNetwork():
         
     
     ########################## Optimization and Training Functions ############################
-    def descend(self, indices:np.ndarray, epoch:int, freeze_folds:bool=False) -> list:
+    def descend(self, indices:np.ndarray, epoch:int, freeze_folds:bool=False, freeze_cut:bool=False) -> list:
         """
         Perform gradient descent on the model
         Parameters:
             indices (ndarray) - The indices of the data to back propagate
             epoch (int) - The current epoch
             freeze_folds (bool) - Whether to freeze the folds during back propogation
+            freeze_cut (bool) - Whether to freeze the cut during back propogation
         """
         # Get the gradient and learning rate decay
         gradient = self.back_propagation(indices)
         learning_rate = self.learning_rate_decay(epoch)
 
         # Update the weights of the cut matrix and the cut biases
-        self.output_layer -=  learning_rate * gradient[0]
-        self.b -= learning_rate * gradient[1]
+        if not freeze_cut:
+            self.output_layer -=  learning_rate * gradient[0]
+            self.b -= learning_rate * gradient[1]
         self.cut_history.append([self.output_layer.copy(), self.b.copy()])
 
         # Update the fold vectors
@@ -395,12 +387,13 @@ class OrigamiNetwork():
         return gradient
 
 
-    def gradient_descent(self, validate:bool=None, freeze_folds:bool=False, epochs=None, verbose=0):
+    def gradient_descent(self, validate:bool=None, freeze_folds:bool=False, freeze_cut:bool=False, epochs=None, verbose=0):
         """
         Perform gradient descent on the model
         Parameters:
             validate (bool - Whether to validate the model
             freeze_folds (bool) - Whether to freeze the folds during back propogation
+            freeze_cut (bool) - Whether to freeze the cut during back propogation
             epochs (int): The number of iterations to run
             verbose (int) - Whether to show the progress of the training (default is 0)
         """
@@ -412,7 +405,7 @@ class OrigamiNetwork():
 
         for epoch in range(epochs):
             # Update the gradient on all the data
-            gradient = self.descend(np.arange(self.n), epoch, freeze_folds=freeze_folds)
+            gradient = self.descend(np.arange(self.n), epoch, freeze_folds=freeze_folds, freeze_cut=freeze_cut)
             
             # If there is a validation set, validate the model
             if validate and epoch % val_update_wait == 0:
@@ -470,11 +463,15 @@ class OrigamiNetwork():
             plt.show()
 
 
-    def stochastic_gradient_descent(self, validate:bool=None, freeze_folds:bool=False, epochs=None, verbose=1):
+    def stochastic_gradient_descent(self, validate:bool=None, freeze_folds:bool=False, freeze_cut:bool=False, epochs=None, verbose=1):
         """
         Perform stochastic gradient descent on the model
         Parameters:
             validate (bool) - Whether to validate the model
+            freeze_folds (bool) - Whether to freeze the folds during back propogation
+            freeze_cut (bool) - Whether to freeze the cut during back propogation
+            epochs (int) - The number of iterations to run
+            verbose (int) - Whether to show the progress of the training (default is 1)
         """
         
         # Loop through the epochs, get the batches, and update the loop
@@ -489,7 +486,7 @@ class OrigamiNetwork():
             
             # Loop through the batches and descend
             for batch in batches:
-                self.descend(batch, epoch, freeze_folds=freeze_folds)
+                self.descend(batch, epoch, freeze_folds=freeze_folds, freeze_cut=freeze_cut)
             
             # If there is a validation set, validate the model
             if validate and epoch % val_update_wait == 0:
@@ -540,7 +537,8 @@ class OrigamiNetwork():
         raise NotImplementedError("Adam is not implemented yet")
 
 
-    def fit(self, X:np.ndarray=None, y:np.ndarray=None, X_val_set=None, y_val_set=None, freeze_folds:bool=False, epochs=None, verbose=1):
+    def fit(self, X:np.ndarray=None, y:np.ndarray=None, X_val_set=None, y_val_set=None, 
+            freeze_folds:bool=False, freeze_cut:bool=False, epochs=None, verbose=1):
         """
         Fit the model to the data
 
@@ -550,6 +548,7 @@ class OrigamiNetwork():
             X_val_set (n_val,d) ndarray - The validation set for the data
             y_val_set (n_val,) ndarray - The validation labels for the data
             freeze_folds (bool) - Whether to freeze the folds during back propogation
+            freeze_cut (bool) - Whether to freeze the cut during back propogation
             epochs (int) - The maximum number of iterations to run
             verbose (int) - Whether to show the progress of the training (default is 1)
         Returns:
@@ -558,8 +557,7 @@ class OrigamiNetwork():
             fold_history (list) - A list of the fold vectors at each iteration
         """
         # Robustly handle the variables
-        if epochs is None:
-            epochs = self.epochs
+        epochs = self.epochs if epochs is None else epochs
         if X is None and self.X is None:
             raise ValueError("X must be provided")
         if y is None and self.y is None:
@@ -579,10 +577,13 @@ class OrigamiNetwork():
             self.width = self.d
             
         # Initialize the cut matrix, fold vectors, and biases
-        if not freeze_folds:
+        if not freeze_cut:
             self.output_layer = self.he_init((self.num_classes, self.width))
-            self.fold_vectors = [] if self.layers == 0 else self.he_init((self.layers, self.width))
             self.b = np.random.rand(self.num_classes)
+        elif self.output_layer is None:
+                raise ValueError("Output layer must be initialized")
+        if not freeze_folds:
+            self.fold_vectors = [] if self.layers == 0 else self.he_init((self.layers, self.width))
 
         # If there is a validation set, save it
         if X_val_set is not None and y_val_set is not None:
@@ -592,9 +593,9 @@ class OrigamiNetwork():
 
         # Run the optimizer
         if self.optimizer == "sgd":
-            self.stochastic_gradient_descent(freeze_folds=freeze_folds, epochs=epochs, verbose=verbose, validate=self.validate)
+            self.stochastic_gradient_descent(freeze_folds=freeze_folds, freeze_cut=freeze_cut, epochs=epochs, verbose=verbose, validate=self.validate)
         elif self.optimizer == "grad":
-            self.gradient_descent(freeze_folds=freeze_folds, epochs=epochs, verbose=verbose, validate=self.validate)
+            self.gradient_descent(freeze_folds=freeze_folds, freeze_cut=freeze_cut, epochs=epochs, verbose=verbose, validate=self.validate)
         elif self.optimizer == "adam":
             self.adam()
         else:
@@ -1221,6 +1222,86 @@ class OrigamiNetwork():
     
         
     ############################## Functions In Development ###############################
+    
+    def beam_search(self, X:np.ndarray=None, y:np.ndarray=None, beam_width:int=5, max_depth:int=5, 
+                    iter:int=10, auto_update:bool=True, verbose=1):
+        """
+        This function uses beam search to find the best folds for the model.
+        Parameters:
+            X (n,d) ndarray: The input data to use for the search.
+            y (n,) ndarray: The labels of the data.
+            beam_width (int): The number of folds to keep at each iteration.
+            max_depth (int): The maximum number of iterations to run.
+            auto_update (bool): Whether to update the model with the best fold found.
+        Returns:
+            best_fold (list): The best fold found by the search.
+        """
+        self.X = X if X is not None else self.X
+        self.y = y if y is not None else self.y
+        assert self.X is not None, "X must be provided"
+        assert self.y is not None, "y must be provided"
+        assert self.layers > 0, "The model must have at least one layer"
+
+        def jostle(particle, scale):
+            """Slightly perturb the particle with Gaussian noise."""
+            return particle + np.random.normal(0, scale, particle.shape)
+
+        # Initialize the beam search with random fold vectors
+        beams = [np.random.rand(self.layers, self.X.shape[1]) for _ in range(beam_width)]
+        best_folds = None
+        best_cut = None
+        best_score = -np.inf
+        base_scale = np.std(self.X) / 20
+
+        # Run the beam search for the specified depth
+        progress = tqdm(total=max_depth*beam_width**2, desc="Beam Search", disable=verbose==0)
+        for depth in range(max_depth-1, -1, -1):
+            shake_splits = []
+            split_scores = []
+            scale_factors = [base_scale * i * (depth + 1) for i in range(beam_width)]
+
+            for i, folds in enumerate(beams):
+                for k in range(beam_width):
+                    if i == 0 and k == 0:
+                        # For the first beam, use the current fold vectors without shaking
+                        self.fold_vectors = folds
+                        self.fit(epochs=iter, verbose=0)
+                        shake_splits.append(folds)
+                    else:
+                        # For other beams, shake the fold vectors based on the scale factor
+                        shaken_folds = [jostle(fold, scale_factors[i]) for fold in folds]
+                        self.fold_vectors = shaken_folds
+                        self.fit(epochs=iter, freeze_folds=True, verbose=0)
+                        shake_splits.append(shaken_folds)
+
+                    score = self.score()
+                    split_scores.append(score)
+                    if score > best_score:
+                        best_folds = self.fold_vectors
+                        best_score = score
+                        best_cut = self.output_layer
+                    progress.update(1)
+                    progress.set_description(f"Beam Search Depth {depth} | Score: {best_score:.2f}")
+
+            # Keep only the top 'beam_width' beams based on the scores
+            beams = [x for _, x in sorted(zip(split_scores, shake_splits), key=lambda pair: pair[0], reverse=True)][:beam_width]
+            # for beam in beams:
+            #     print(np.round(beam, 2), end=", ")
+            # print()
+            # for score in split_scores:
+            #     print(score, end=", ")
+            # print()
+            # print("max depth", max_depth, "depth", depth)
+        
+        progress.close()
+        if auto_update:
+            self.fold_vectors = best_folds
+            self.output_layer = best_cut
+        return best_folds, best_cut, best_score
+
+        
+        
+    
     def sig_fold(self, Z:np.ndarray, n:np.ndarray) -> np.ndarray:
         """
         This function does a soft fold of the data along the hyperplane defined by the normal vector n
@@ -1267,7 +1348,7 @@ class OrigamiNetwork():
         first_half = 2 * sigmoid * (first_component + second_component)
         
         # Calculate the second half of the derivative
-        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
+        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,k->ikj', Z - 2*n[np.newaxis,:], n)
         return first_half + second_half
 
 
