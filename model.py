@@ -1268,7 +1268,7 @@ class OrigamiNetwork():
         first_half = 2 * sigmoid * (first_component + second_component)
         
         # Calculate the second half of the derivative
-        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,kj->ikj', Z - 2*n[np.newaxis,:], n)
+        second_half = 2 * self.crease * one_minus_scales * sigmoid * (1-sigmoid) * np.einsum('ij,k->ikj', Z - 2*n[np.newaxis,:], n)
         return first_half + second_half
 
 
