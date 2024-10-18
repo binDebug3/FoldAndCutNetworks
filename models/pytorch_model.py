@@ -12,12 +12,17 @@ from tqdm import tqdm
 
 
 class Fold(nn.Module):
-    def __init__(self, width, leak):
-        super(Fold, self).__init__()
-        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+    def __init__(self, leak=0):
+        super().__init__()
+        self.n = None
         self.leak = leak
     
     def forward(self, input):
+        # Initialize the normal vector if first pass
+        if self.n is None:
+            width = input.shape[1]
+            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        
         # Ensure norm is non-zero
         if self.n.norm() == 0:
             self.n = self.n + 1e-8
@@ -30,7 +35,65 @@ class Fold(nn.Module):
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
         return input + 2 * indicator.unsqueeze(1) * (self.n - projection)
-    
+       
+
+class SigmoidFold(nn.Module):
+    """
+    Sigmoid Fold module.
+
+    This module performs a soft fold of the input data along the hyperplane defined by the normal vector n.
+    It uses a sigmoid function to smoothly transition the folding effect.
+
+    Parameters:
+        width (int): The dimensionality of the input data.
+        crease (float or None): A scaling factor for the sigmoid function. If None, it is set as a learnable parameter.
+
+    Attributes:
+        n (nn.Parameter): The normal vector of the hyperplane (learnable parameter).
+        crease (nn.Parameter or float): The sigmoid scaling factor (learnable or fixed).
+    """
+    def __init__(self, crease=None):
+        super().__init__()
+        self.n = None
+        
+        # Initialize crease parameter
+        if crease is None:
+            self.crease = nn.Parameter(torch.tensor(1.0))
+        else:
+            self.register_buffer('crease', torch.tensor(crease))
+
+    def forward(self, input):
+        """
+        Forward pass of the Sigmoid Fold module.
+
+        Parameters:
+            input (torch.Tensor): Input tensor of shape (batch_size, width).
+
+        Returns:
+            torch.Tensor: Folded output tensor of shape (batch_size, width).
+        """
+        # Initialize the normal vector according to the input width if not already initialized
+        if self.n is None:
+            width = input.shape[1]
+            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        
+        # Ensure self.n.norm() is not zero to avoid division by zero
+        if self.n.norm() == 0:
+            self.n.data += 1e-8  # Modify the parameter in-place
+
+        # Compute z_dot_x (batch_size,), n_dot_n (batch_size), and get scales
+        z_dot_x = input @ self.n
+        n_dot_n = torch.dot(self.n, self.n)
+        scales = z_dot_x / n_dot_n
+
+        # Compute our sigmoid value (batch_size,)
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = 1 / (1 + torch.exp(-p))
+
+        # get the orthogonal projection of the input onto the normal vector and get the output
+        ortho_proj = (1 - scales).unsqueeze(1) * self.n
+        output = input + 2 * sigmoid.unsqueeze(1) * ortho_proj
+        return output
 
 
 class NoamScheduler(optim.lr_scheduler._LRScheduler):
