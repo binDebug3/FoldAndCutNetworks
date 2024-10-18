@@ -144,6 +144,7 @@ class OrigamiNetwork(nn.Module):
         self.num_classes = None
         self.one_hot = None
         self.fold_history = []
+        self.learning_rates = []
 
     def initialize_layers(self):
         if self.X is None and self.y is None:
@@ -173,21 +174,6 @@ class OrigamiNetwork(nn.Module):
         self.classes = torch.unique(y)
         self.num_classes = len(self.classes)
         self.one_hot = F.one_hot(y, num_classes = self.num_classes).float()
-
-    # def fold(self, Z, n):
-    #     if n.norm() == 0:
-    #         n = n + 1e-8
-    #     scales = (Z@n)/(n@n) 
-    #     print(f'scales shape: {scales.shape}')
-    #     indicator = (scales > 1).float()
-    #     indicator = indicator + (1 - indicator) * self.leak
-
-    #     projected = scales.unsqueeze(1) * n
-    #     print(f'projected shape: {projected.shape}')
-    #     folded = Z + 2 * indicator.unsqueeze(1) * (n - projected)
-    #     print(f'folded shape: {folded.shape}')
-
-    #     return folded
     
     def compile_model(self):
         if self.optimizer_type == "grad":
@@ -200,7 +186,7 @@ class OrigamiNetwork(nn.Module):
             raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
         
         if self.lr_schedule:
-            self.schedule = NoamScheduler(self.optimizer, 30, 2)
+            self.schedule = NoamScheduler(self.optimizer, 200, self.width)
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, D, return_intermediate = False):
@@ -245,12 +231,14 @@ class OrigamiNetwork(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 
-            
+                if self.lr_schedule:
+                    self.schedule.step()
+                lr = self.optimizer.param_groups[0]['lr']
+                self.learning_rates.append(lr)
             if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
-            if self.lr_schedule:
-                    self.schedule.step()
+            
             progress.update(1)
         progress.close()
 
