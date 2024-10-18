@@ -570,6 +570,7 @@ class OrigamiNetwork():
         self.n = self.X.shape[0]
         self.d = self.X.shape[1]
         self.encode_y(self.y)
+        #test comment
 
         # Initialize the expand matrix if necessary
         if self.has_expand:
