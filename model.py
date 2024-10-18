@@ -195,6 +195,7 @@ class OrigamiNetwork():
         try:
             scales = (Z@n)/np.dot(n, n)
         except ValueError:
+            print("Divide by zero error I think")
             print("Z shape:", Z.shape)
             print("n shape:", n.shape)
             print("n@n:", type(np.dot(n, n)))
@@ -581,11 +582,9 @@ class OrigamiNetwork():
             self.output_layer = self.he_init((self.num_classes, self.width))
             self.b = np.random.rand(self.num_classes)
         elif self.output_layer is None:
-                raise ValueError("Output layer must be initialized")
-        if not freeze_folds:
+            raise ValueError("Output layer must be initialized")
+        if not freeze_folds and self.fold_vectors is None:
             self.fold_vectors = [] if self.layers == 0 else self.he_init((self.layers, self.width))
-            self.fold_vectors = np.array([[0, .5]])
-            print("setting fold vectors to ", self.fold_vectors)
 
         # If there is a validation set, save it
         if X_val_set is not None and y_val_set is not None:
