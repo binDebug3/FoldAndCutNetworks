@@ -159,7 +159,7 @@ class OrigamiNetwork(nn.Module):
         else:
             return logits
     
-    def fit(self, X, y, X_val = None, y_val = None, verbose=1):
+    def fit(self, X, y, X_val=None, y_val=None, validate=True, verbose=1):
         self.X = torch.tensor(X, dtype = torch.float32).to(self.device)
         self.y = torch.tensor(y, dtype = torch.long).to(self.device)
 
@@ -169,6 +169,7 @@ class OrigamiNetwork(nn.Module):
         dataset = torch.utils.data.TensorDataset(self.X, self.y)
         data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
 
+        val_update_wait = max(1, self.epochs // 50)
         progress = tqdm(total=self.epochs, desc="Training", disable=verbose==0)
         for epoch in range(self.epochs):
             fold_vectors_epoch = [fv.n.clone().detach().cpu().numpy() for fv in self.fold_layers]
@@ -182,7 +183,7 @@ class OrigamiNetwork(nn.Module):
                 self.optimizer.step()
                 
             
-            if X_val is not None and y_val is not None:
+            if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
             if self.lr_schedule:

@@ -1,0 +1,62 @@
+Datasets (Choose 5)
+CIFAR-10 (dallin)
+Small digits (jeddy)
+Fashion (jeddy)
+ImageNet (hold off)
+Cancer (dallin)
+Ignore
+MNIST
+CIFAR-100
+Places365
+SVHN
+Iris
+Diabetes
+Titanic
+
+Stay consistent on
+Training/testing data size
+Input shape (number of features/size of image)
+Grayscale vs color
+Number of output classes
+Use a random seed each time
+Hyperparameter turning
+No tuning
+
+Architectures (Choose 5)
+CNN
+RandomForest
+Our model
+Metric
+K-nearest neighbors
+Ignore
+Xgboost
+K-means
+Naive bayes
+HMMs
+
+Metrics
+results/[dataset name]/[model]/npy_files/
+[train/val]_[info type]_[iter]_[date].npy
+results/[dataset name]/[model]/charts/
+[train/val]_[info type]_[iter]_[date].npy
+Training/validation loss
+Training/validation top 1 accuracy
+Training/validation top n accuracy
+Number of iterations/epochs (x axis)
+Amount of training data (x axis)
+500
+Relative time to train (how long the epoch took)
+Repeat 3-6 times for each set up (show error bars)
+5 times (iter)
+
+Other CS Paper Notes
+Follows a fairly popular five section outline
+Always 8-10 pages with everything that doesn’t fit in the Appendix
+Single and double columns are both common
+Tables, charts, pseudo code algorithms are very common
+Theorems, corollaries, and formulas are less common but still normal
+
+Papers to Read
+AdaBelief Optimizer
+Lottery Ticket Initialization
+If you guys want more I can give you more recommendations
