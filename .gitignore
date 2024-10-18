@@ -1,3 +1,8 @@
 __pycache__/
 .vscode/
 .idea/
+BenchmarkTests/data/
+BenchmarkTests/results/
+BenchmarkTests/__pycache__/
+BenchmarkTests/.ipynb_checkpoints/
+*.pkl
