@@ -30,18 +30,30 @@ class Fold(nn.Module):
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
         return input + 2 * indicator.unsqueeze(1) * (self.n - projection)
+    
 
 
+class NoamScheduler(optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1):
+        self.warmup_steps = warmup_steps
+        self.model_size = model_size
+        super(NoamScheduler, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        step_num = self.last_epoch + 1
+        lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
+        return [lr for _ in self.base_lrs]
 
 
 class OrigamiNetwork(nn.Module):
-    def __init__(self, n_layers = 3, width = None, learning_rate = 0.001, reg = 10, sigmoid = False, optimizer_type = "grad", 
+    def __init__(self, n_layers = 3, width = None, learning_rate = 0.001, reg = 10, sigmoid = False, optimizer_type = "grad", lr_schedule = False,
                  batch_size = 32, epochs = 100, leak = 0, crease = 1):
         
         super(OrigamiNetwork, self).__init__()
 
         self.learning_rate = learning_rate
         self.optimizer_type = optimizer_type
+        self.lr_schedule = lr_schedule
         self.batch_size = batch_size
         self.epochs = epochs
         self.reg = reg
@@ -124,6 +136,8 @@ class OrigamiNetwork(nn.Module):
         else:
             raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
         
+        if self.lr_schedule:
+            self.schedule = NoamScheduler(self.optimizer, 30, 2)
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, D, return_intermediate = False):
@@ -167,10 +181,13 @@ class OrigamiNetwork(nn.Module):
                 loss = self.loss_fn(y_hat, batch_y)
                 loss.backward()
                 self.optimizer.step()
+                
             
             if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
+            if self.lr_schedule:
+                    self.schedule.step()
 
     
     def evaluate(self, X_val, y_val):
