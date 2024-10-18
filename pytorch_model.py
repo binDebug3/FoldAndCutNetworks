@@ -7,6 +7,32 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+
+
+class Fold(nn.Module):
+    def __init__(self, width, leak):
+        super(Fold, self).__init__()
+        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        self.leak = leak
+    
+    def forward(self, input):
+        # Ensure norm is non-zero
+        if self.n.norm() == 0:
+            self.n = self.n + 1e-8
+
+        # Compute scales and indicator
+        scales = (input @ self.n) / (self.n @ self.n)
+        indicator = (scales > 1).float()
+        indicator = indicator + (1 - indicator) * self.leak
+
+        # Compute the projected and folded values
+        projection = scales.unsqueeze(1) * self.n
+        return input + 2 * indicator.unsqueeze(1) * (self.n - projection)
+
+
+
 
 class OrigamiNetwork(nn.Module):
     def __init__(self, n_layers = 3, width = None, learning_rate = 0.001, reg = 10, sigmoid = False, optimizer_type = "grad", 
@@ -32,7 +58,7 @@ class OrigamiNetwork(nn.Module):
 
         # Model parameters (to be initialized later)
         self.input_layer = None
-        self.fold_vectors = None
+        self.fold_layers = None
         self.output_layer = None
         self.b = None
 
@@ -42,7 +68,7 @@ class OrigamiNetwork(nn.Module):
         self.classes = None
         self.num_classes = None
         self.one_hot = None
-        self.fold_vectors_history = []
+        self.fold_history = []
 
     def initialize_layers(self):
         if self.X is None and self.y is None:
@@ -62,10 +88,7 @@ class OrigamiNetwork(nn.Module):
             self.has_expand = False
 
         # Initialize fold vectors
-        self.fold_vectors = nn.ParameterList([
-            nn.Parameter(torch.randn(self.width) * (2 / self.width) ** 0.5)
-            for _ in range(self.layers)
-        ])
+        self.fold_layers = nn.ModuleList([Fold(self.width, self.leak) for _ in range(self.layers)])
 
         # Initialize output layer and bias
         self.output_layer = nn.Linear(self.width, self.num_classes)
@@ -76,17 +99,20 @@ class OrigamiNetwork(nn.Module):
         self.num_classes = len(self.classes)
         self.one_hot = F.one_hot(y, num_classes = self.num_classes).float()
 
-    def fold(self, Z, n):
-        if n.norm() == 0:
-            n = n + 1e-8
-        scales = (Z@n)/(n@n) 
-        indicator = (scales > 1).float()
-        indicator = indicator + (1 - indicator) * self.leak
+    # def fold(self, Z, n):
+    #     if n.norm() == 0:
+    #         n = n + 1e-8
+    #     scales = (Z@n)/(n@n) 
+    #     print(f'scales shape: {scales.shape}')
+    #     indicator = (scales > 1).float()
+    #     indicator = indicator + (1 - indicator) * self.leak
 
-        projected = scales.unsqueeze(1) * n
-        folded = Z + 2 * indicator.unsqueeze(1) * (n - projected)
+    #     projected = scales.unsqueeze(1) * n
+    #     print(f'projected shape: {projected.shape}')
+    #     folded = Z + 2 * indicator.unsqueeze(1) * (n - projected)
+    #     print(f'folded shape: {folded.shape}')
 
-        return folded
+    #     return folded
     
     def compile_model(self):
         if self.optimizer_type == "grad":
@@ -109,8 +135,8 @@ class OrigamiNetwork(nn.Module):
             Z = D
             outputs.append(Z)
         
-        for fold_vector in self.fold_vectors:
-            Z = self.fold(Z, fold_vector)
+        for fold_vector in self.fold_layers:
+            Z = fold_vector.forward(Z)
             outputs.append(Z)
         
         logits = self.output_layer(Z)
@@ -119,7 +145,7 @@ class OrigamiNetwork(nn.Module):
         else:
             return logits
     
-    def fit(self, X, y, X_val = None, y_val = None):
+    def fit(self, X, y, X_val = None, y_val = None, verbose=1):
         self.X = torch.tensor(X, dtype = torch.float32).to(self.device)
         self.y = torch.tensor(y, dtype = torch.long).to(self.device)
 
@@ -129,9 +155,10 @@ class OrigamiNetwork(nn.Module):
         dataset = torch.utils.data.TensorDataset(self.X, self.y)
         data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
 
+        progress = tqdm(total=self.epochs, desc="Training", disable=verbose==0)
         for epoch in range(self.epochs):
-            fold_vectors_epoch = [fv.clone().detach().cpu().numpy() for fv in self.fold_vectors]
-            self.fold_vectors_history.append(fold_vectors_epoch)
+            fold_vectors_epoch = [fv.n.clone().detach().cpu().numpy() for fv in self.fold_layers]
+            self.fold_history.append(fold_vectors_epoch)
             for batch_X, batch_y in data_loader:
                 batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
                 self.optimizer.zero_grad()
@@ -141,7 +168,8 @@ class OrigamiNetwork(nn.Module):
                 self.optimizer.step()
             
             if X_val is not None and y_val is not None:
-                self.evaluate(X_val, y_val)
+                acc = self.evaluate(X_val, y_val)
+                progress.set_description(f"Val Accuracy: {round(acc, 4)}")
 
     
     def evaluate(self, X_val, y_val):
@@ -152,7 +180,7 @@ class OrigamiNetwork(nn.Module):
             y_hat = self.forward(X_val)
             _, predicted = torch.max(y_hat, 1)
             accuracy = (predicted == y_val).float().mean()
-            print(f"Validation Accuracy: {accuracy.item():.4f}")
+            return accuracy.item()
 
     
     def predict(self, X):
@@ -221,7 +249,7 @@ class OrigamiNetwork(nn.Module):
         y = y.detach().cpu().numpy()
 
         # Get the fold vector
-        hyperplane = self.fold_vectors[layer_index].detach().cpu().numpy()
+        hyperplane = self.fold_layers[layer_index].n.detach().cpu().numpy()
 
         # Extract the two dimensions to plot
         if Z.shape[1] >= 2:
@@ -241,10 +269,10 @@ class OrigamiNetwork(nn.Module):
             fig.update_layout(title=f'Layer {layer_index} Fold Visualization', xaxis_title='Feature 1', yaxis_title='Feature 2')
             fig.show()
         else:
-            import matplotlib.pyplot as plt
             # Create a Matplotlib plot
             plt.figure(figsize=(8, 6))
             plt.scatter(outx, outy, c=y, cmap='viridis', label='Data')
+
             # Draw the fold (hyperplane)
             self.draw_fold(hyperplane, outx, outy, color='red', name='Fold')
             plt.title(f'Layer {layer_index} Fold Visualization')
@@ -252,6 +280,11 @@ class OrigamiNetwork(nn.Module):
             plt.ylabel('Feature 2')
             plt.legend()
             plt.show()
+
+
+
+
+        
 
 
 
