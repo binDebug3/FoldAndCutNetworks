@@ -188,6 +188,8 @@ class OrigamiNetwork(nn.Module):
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
             if self.lr_schedule:
                     self.schedule.step()
+            progress.update(1)
+        progress.close()
 
     
     def evaluate(self, X_val, y_val):
