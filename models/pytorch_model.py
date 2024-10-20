@@ -20,17 +20,12 @@ class Fold(nn.Module):
     This class defines a fold layer in the Origami Network.
     The fold layer literally folds the data along a hyperplane defined by 'n' in n-dimensional space.
     """
-    def __init__(self, leak=0):
+    def __init__(self, width, leak=0):
         super().__init__()
-        self.n = None
+        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
         self.leak = leak
     
     def forward(self, input):
-        # Initialize the normal vector if first pass
-        if self.n is None:
-            width = input.shape[1]
-            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
-        
         # Ensure norm is non-zero
         if self.n.norm() == 0:
             self.n = self.n + 1e-8
@@ -114,6 +109,9 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
         step_num = self.last_epoch + 1
         lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
         return [lr for _ in self.base_lrs]
+
+
+
 
 
 
@@ -275,7 +273,7 @@ class OrigamiNetwork(nn.Module):
         self.data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
     
     
-    def fit(self, X=None, y=None, X_val=None, y_val=None, validate=True, verbose=1):
+    def fit(self, X=None, y=None, X_val=None, y_val=None, validate=True, history=True, verbose=1):
         """
         Trains the model on the input data.
         Parameters:
@@ -284,8 +282,7 @@ class OrigamiNetwork(nn.Module):
             X_val (np.ndarray) - The validation input data
             y_val (np.ndarray) - The validation labels
             validate (bool) - Whether to validate the model during training
-            freeze_folds (bool) - Whether to freeze the fold layers during training
-            freeze_cut (bool) - Whether to freeze the cut layer during training
+            history (bool) - Whether to save the performance and parameter history
             verbose (int) - The verbosity level of the training
         Returns:
             history (list) - The training history of the model
@@ -300,7 +297,7 @@ class OrigamiNetwork(nn.Module):
         val_update_wait = max(1, self.epochs // 50)
         progress = tqdm(total=self.epochs, desc="Training", disable=verbose==0)
         for epoch in range(self.epochs):
-            self.update_history()
+            history and self.update_history()
             for batch_X, batch_y in self.data_loader:
                 batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device, dtype=torch.long)
                 self.optimizer.zero_grad()
@@ -315,9 +312,8 @@ class OrigamiNetwork(nn.Module):
                 self.learning_rates.append(lr)
             if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
-                self.val_history.append(acc)
-                progress.set_description(f"Val Accuracy: {round(acc, 4)}")
-            
+                history and self.val_history.append(acc)
+                progress.set_description(f"Val Accuracy: {round(acc, 4)}")                
             progress.update(1)
         progress.close()
         return self.get_history()
@@ -389,7 +385,7 @@ class OrigamiNetwork(nn.Module):
         Parameters:
             fold_vectors (list(np.ndarray / torch.tensor)) - nxd (n_layer rows by dimension columns) The fold vectors to set
         """
-        assert self.n_layers == len(fold_vectors), f"Number of fold vectors must match the number of layers ({len(fold_vectors)} != {self.n_layers})"
+        assert self.layers == len(fold_vectors), f"Number of fold vectors must match the number of layers ({len(fold_vectors)} != {self.layers})"
         # fix typing
         if type(fold_vectors[0]) == list:
             fold_vectors = [np.array(fv) for fv in fold_vectors]
