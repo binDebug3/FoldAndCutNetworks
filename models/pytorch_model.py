@@ -20,12 +20,17 @@ class Fold(nn.Module):
     This class defines a fold layer in the Origami Network.
     The fold layer literally folds the data along a hyperplane defined by 'n' in n-dimensional space.
     """
-    def __init__(self, width, leak):
-        super(Fold, self).__init__()
-        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+    def __init__(self, leak=0):
+        super().__init__()
+        self.n = None
         self.leak = leak
     
     def forward(self, input):
+        # Initialize the normal vector if first pass
+        if self.n is None:
+            width = input.shape[1]
+            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        
         # Ensure norm is non-zero
         if self.n.norm() == 0:
             self.n = self.n + 1e-8
@@ -38,7 +43,65 @@ class Fold(nn.Module):
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
         return input + 2 * indicator.unsqueeze(1) * (self.n - projection)
-    
+       
+
+class SigmoidFold(nn.Module):
+    """
+    Sigmoid Fold module.
+
+    This module performs a soft fold of the input data along the hyperplane defined by the normal vector n.
+    It uses a sigmoid function to smoothly transition the folding effect.
+
+    Parameters:
+        width (int): The dimensionality of the input data.
+        crease (float or None): A scaling factor for the sigmoid function. If None, it is set as a learnable parameter.
+
+    Attributes:
+        n (nn.Parameter): The normal vector of the hyperplane (learnable parameter).
+        crease (nn.Parameter or float): The sigmoid scaling factor (learnable or fixed).
+    """
+    def __init__(self, crease=None):
+        super().__init__()
+        self.n = None
+        
+        # Initialize crease parameter
+        if crease is None:
+            self.crease = nn.Parameter(torch.tensor(1.0))
+        else:
+            self.register_buffer('crease', torch.tensor(crease))
+
+    def forward(self, input):
+        """
+        Forward pass of the Sigmoid Fold module.
+
+        Parameters:
+            input (torch.Tensor): Input tensor of shape (batch_size, width).
+
+        Returns:
+            torch.Tensor: Folded output tensor of shape (batch_size, width).
+        """
+        # Initialize the normal vector according to the input width if not already initialized
+        if self.n is None:
+            width = input.shape[1]
+            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        
+        # Ensure self.n.norm() is not zero to avoid division by zero
+        if self.n.norm() == 0:
+            self.n.data += 1e-8  # Modify the parameter in-place
+
+        # Compute z_dot_x (batch_size,), n_dot_n (batch_size), and get scales
+        z_dot_x = input @ self.n
+        n_dot_n = torch.dot(self.n, self.n)
+        scales = z_dot_x / n_dot_n
+
+        # Compute our sigmoid value (batch_size,)
+        p = self.crease * (z_dot_x - n_dot_n)
+        sigmoid = 1 / (1 + torch.exp(-p))
+
+        # get the orthogonal projection of the input onto the normal vector and get the output
+        ortho_proj = (1 - scales).unsqueeze(1) * self.n
+        output = input + 2 * sigmoid.unsqueeze(1) * ortho_proj
+        return output
 
 
 class NoamScheduler(optim.lr_scheduler._LRScheduler):
@@ -91,6 +154,7 @@ class OrigamiNetwork(nn.Module):
         self.val_history = []
         self.train_history = []
         self.fold_history = []
+        self.learning_rates = []
         self.cut_history = []
 
 
@@ -133,7 +197,6 @@ class OrigamiNetwork(nn.Module):
         self.classes = torch.unique(y)
         self.num_classes = len(self.classes)
         self.one_hot = F.one_hot(y, num_classes = self.num_classes).float()
-
     
     def compile_model(self):
         """
@@ -149,7 +212,7 @@ class OrigamiNetwork(nn.Module):
             raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
         
         if self.lr_schedule:
-            self.schedule = NoamScheduler(self.optimizer, 30, 2)
+            self.schedule = NoamScheduler(self.optimizer, 200, self.width)
         self.loss_fn = nn.CrossEntropyLoss()
 
 
@@ -246,12 +309,15 @@ class OrigamiNetwork(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 
+                if self.lr_schedule:
+                    self.schedule.step()
+                lr = self.optimizer.param_groups[0]['lr']
+                self.learning_rates.append(lr)
             if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
                 self.val_history.append(acc)
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
-            if self.lr_schedule:
-                self.schedule.step()
+            
             progress.update(1)
         progress.close()
         return self.get_history()
