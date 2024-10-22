@@ -880,8 +880,8 @@ class OrigamiNetwork():
             max_features (list) - The features that produced the maximum score
         """
         # set default values
-        X = X if X is not None else self.X
-        y = y if y is not None else self.y
+        X = self.X
+        y = self.y
         density = [density]*self.d if density is not None else [10]*self.d
         feature_mins = feature_mins if feature_mins is not None else np.min(X, axis=0)
         feature_maxes = feature_maxes if feature_maxes is not None else np.max(X, axis=0)
