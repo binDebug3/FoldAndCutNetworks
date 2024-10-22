@@ -185,12 +185,20 @@ class OrigamiNetwork(nn.Module):
         else:
             self.has_expand = False
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
         # Initialize fold vectors
         self.fold_layers = nn.ModuleList([Fold(self.leak) for _ in range(self.layers)])
 
         # Initialize output layer and bias
+<<<<<<< HEAD
+=======
+=======
 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
         # Initialize fold vectors and cut layer
         if self.crease == 0:
             self.fold_layers = nn.ModuleList([Fold(self.width, self.leak) for _ in range(self.layers)])
@@ -198,7 +206,11 @@ class OrigamiNetwork(nn.Module):
             self.fold_layers = nn.ModuleList([SigmoidFold(self.width, self.crease) for _ in range(self.layers)])
             if self.verbose > 1 and self.leak != 0:
                 warnings.warn("Leaky folds are ignored when crease is nonzero.")
+<<<<<<< HEAD
+>>>>>>> bece768d992fb17109353ada43a0001ebdb088f2
+=======
 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
         self.output_layer = nn.Linear(self.width, self.num_classes)
     
     
@@ -317,6 +329,17 @@ class OrigamiNetwork(nn.Module):
         val_update_wait = max(1, self.epochs // 50)
         progress = tqdm(total=self.epochs, desc="Training", disable=self.verbose==0)
         for epoch in range(self.epochs):
+<<<<<<< HEAD
+<<<<<<< HEAD
+            
+            for batch_X, batch_y in data_loader:
+                batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
+=======
+            history and self.update_history()
+            for batch_X, batch_y in self.data_loader:
+                batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device, dtype=torch.long)
+>>>>>>> bece768d992fb17109353ada43a0001ebdb088f2
+=======
 
             
             for batch_X, batch_y in data_loader:
@@ -326,6 +349,7 @@ class OrigamiNetwork(nn.Module):
             for batch_X, batch_y in self.data_loader:
                 batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device, dtype=torch.long)
 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
                 self.optimizer.zero_grad()
                 y_hat = self.forward(batch_X)
                 loss = self.loss_fn(y_hat, batch_y)
@@ -338,15 +362,26 @@ class OrigamiNetwork(nn.Module):
             self.learning_rates.append(lr)
             if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
                 acc = self.evaluate(X_val, y_val)
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")
 
             fold_vectors_epoch = [fv.n.clone().detach().cpu().numpy() for fv in self.fold_layers]
             self.fold_history.append(fold_vectors_epoch)
+<<<<<<< HEAD
+=======
+                history and self.val_history.append(acc)
+                progress.set_description(f"Val Accuracy: {round(acc, 4)}")                
+>>>>>>> bece768d992fb17109353ada43a0001ebdb088f2
+=======
 
                 history and self.val_history.append(acc)
                 progress.set_description(f"Val Accuracy: {round(acc, 4)}")                
                 
+>>>>>>> b4d445d4c3f020a28e6e30f1eaf9c7fa4c9ccec4
             progress.update(1)
         progress.close()
         return self.get_history()
