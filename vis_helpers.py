@@ -122,7 +122,7 @@ def plot_folds(model, layer_index=0, use_plotly=False):
         fig.show()
     else:
         # Create a Matplotlib plot
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=(6, 5), dpi=120)
         plt.scatter(outx, outy, c=y, cmap='viridis', label='Data')
 
         # Draw the fold (hyperplane)
@@ -273,15 +273,16 @@ def plot_history(model, n_folds=50, include_cut=True, verbose=1):
 
 
 
-def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = None, feature_maxes: torch.Tensor = None, density: int = 10, 
-                     f1id: int = 0, f2id: int = 1, create_plot: bool = False, png_path: str = None, theme: str = "viridis",
-                     verbose: int = 0):
+def create_landscape(model, landscape_type:str="Score", show_layers:int=None, feature_mins:torch.Tensor=None, feature_maxes:torch.Tensor=None, 
+                     density:int=10, f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
+                     trace_path:bool=True, path_density:int=10, verbose:int=1):
     """
     Visualizes the score landscape of the model for a given layer and two features.
     
     Parameters:
         model (OrigamiNetwork) - The model to visualize
-        score_layers (int or list) - The layer(s) to calculate the score for
+        type (str) - The type of landscape to create (either "Score" or "Loss")
+        show_layers (int or list) - The layer(s) to calculate the score for
         feature_mins (torch.Tensor) - The minimum values for each feature
         feature_maxes (torch.Tensor) - The maximum values for each feature
         density (int) - The number of points to calculate the score for
@@ -290,11 +291,15 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
         create_plot (bool) - Whether to create a plot of the score landscape
         png_path (str) - The path to save the plot to
         theme (str) - The theme of the plot
+        trace_path (bool) - Whether to trace the path of the model fold vectors
+        path_density (int) - The number of points to calculate the path for
         verbose (int) - Whether to show the progress of the training (default is 1)
     Returns:
         max_score (float) - The maximum score of the model
         max_features (list) - The features that produced the maximum score
     """
+    assert landscape_type in ["Score", "Loss"], f"type must be either 'Score' or 'Loss'. Instead got {landscape_type}"
+    mm = "Max" if landscape_type == "Score" else "Min"
     # Set default values
     og_model = copy.deepcopy(model)
     X = model.X
@@ -302,12 +307,12 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
     density = [density] * X.shape[1] if density is not None else [10] * X.shape[1]
     feature_mins = feature_mins if feature_mins is not None else torch.min(X, dim=0).values
     feature_maxes = feature_maxes if feature_maxes is not None else torch.max(X, dim=0).values
-    score_layers = score_layers if isinstance(score_layers, list) else [score_layers] if isinstance(score_layers, int) else [l for l in range(model.layers)]
+    show_layers = show_layers if isinstance(show_layers, list) else [show_layers] if isinstance(show_layers, int) else [l for l in range(model.layers)]
 
     # Input error handling
-    assert isinstance(X, torch.Tensor) and X.ndim == 2, f"X must be a 2D PyTorch tensor. Instead got {type(X)}"
-    assert isinstance(y, torch.Tensor), f"y must be a PyTorch tensor. Instead got {type(y)}"
-    assert isinstance(score_layers, list) and len(score_layers) > 0 and isinstance(score_layers[0], int), f"score_layers must be a list of integers. Instead got {score_layers}"
+    assert isinstance(X, torch.Tensor) and X.ndim == 2, f"X must be a 2D PyTorch tensor. Instead got {landscape_type(X)}"
+    assert isinstance(y, torch.Tensor), f"y must be a PyTorch tensor. Instead got {landscape_type(y)}"
+    assert isinstance(show_layers, list) and len(show_layers) > 0 and isinstance(show_layers[0], int), f"show_layers must be a list of integers. Instead got {show_layers}"
     
     # Create a grid of features (use torch.linspace instead of np.linspace)
     feature_folds = []
@@ -317,25 +322,26 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
     # Use torch.meshgrid to get feature combinations
     feature_combinations = torch.cartesian_prod(*feature_folds)
 
-    # Compute scores for each feature combination and each layer
-    max_scores = []
-    max_features_list = []
+    # Compute scores/losses for each feature combination and each layer
+    best_values = []
+    best_features_list = []
 
-    for score_layer in score_layers:
-        scores = []
-        for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"score Layer {score_layer}"):
-            model.fold_layers[score_layer].n = nn.Parameter(features.clone().detach().to(model.device))
+    for layer in show_layers:
+        values = []
+        for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"{landscape_type} Layer {layer}"):
+            model.fold_layers[layer].n = nn.Parameter(features.clone().detach().to(model.device))
             model.output_layer.load_state_dict(og_model.output_layer.state_dict())
-            scores.append(model.score(X, y).item())
+            value = model.score(X, y).item() if landscape_type == "Score" else model.get_loss(X, y).item()
+            values.append(value)
         
-        # Find the maximum score and the features that produced it
-        scores = torch.tensor(scores)
-        max_score = torch.max(scores).item()
-        max_index = torch.argmax(scores).item()
-        max_scores.append(max_score)
-        max_features_list.append(feature_combinations[max_index])
+        # Find the maximum score/minimum loss and the features that produced it
+        values = torch.tensor(values)
+        best_value = torch.max(values).item() if landscape_type == "Score" else torch.min(values).item()
+        best_index = torch.argmax(values).item() if landscape_type == "Score" else torch.argmin(values).item()
+        best_values.append(best_value)
+        best_features_list.append(feature_combinations[best_index])
 
-        # Create a heatmap of the score landscape for features f1id and f2id
+        # Create a heatmap of the score/loss landscape for features f1id and f2id
         if create_plot:
             f1 = feature_combinations[:, f1id].cpu().numpy()
             f2 = feature_combinations[:, f2id].cpu().numpy()
@@ -346,16 +352,16 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
             mesh = np.zeros((len(f2_folds), len(f1_folds)))
             for i, f1_val in enumerate(f1_folds):
                 for j, f2_val in enumerate(f2_folds):
-                    mesh[j, i] = scores[(f1 == f1_val) & (f2 == f2_val)].item()
+                    mesh[j, i] = values[(f1 == f1_val) & (f2 == f2_val)].item()
 
             offset = 1 if model.has_expand else 0
-            model.fold_layers = og_model.fold_layers
+            model.fold_layers = copy.deepcopy(og_model.fold_layers)
             _, paper = model.forward(X, return_intermediate=True)
-            outx = paper[offset + score_layer][:, f1id].detach().numpy()
-            outy = paper[offset + score_layer][:, f2id].detach().numpy()
+            outx = paper[offset + layer][:, f1id].detach().numpy()
+            outy = paper[offset + layer][:, f2id].detach().numpy()
 
             # Create subplots
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Input Data", "Score Landscape"), 
+            fig = make_subplots(rows=1, cols=2, subplot_titles=("Input Data", f"{landscape_type} Landscape"), 
                                 specs=[[{"type": "scatter"}, {"type": "heatmap"}]])
 
             # Scatter plot with colors
@@ -363,24 +369,34 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
                                     marker=dict(color=y.cpu().numpy().astype(int)*0.5 + 0.2, colorscale=theme, size=8), 
                                     name="Data", showlegend=False), row=1, col=1)
 
-            # Add predicted and maximum folds
-            pred_fold = og_model.fold_layers[score_layer].n.detach().numpy()
-            best_fold = max_features_list[-1].cpu().numpy()
-            fig.add_trace(idraw_fold(pred_fold, outx, outy, color="red", 
+            # Add predicted and best folds
+            pred_fold = og_model.fold_layers[layer].n.detach().numpy()
+            best_fold = best_features_list[-1].cpu().numpy()
+            fig.add_trace(idraw_fold(pred_fold, outx, outy, color="magenta", 
                                     name=f"Predicted Fold ({pred_fold[f1id]:.2f}, {pred_fold[f2id]:.2f})"), row=1, col=1)
             fig.add_trace(idraw_fold(best_fold, outx, outy, color="black", 
-                                    name=f"Maximum Score Fold ({best_fold[f1id]:.2f}, {best_fold[f2id]:.2f})"), row=1, col=1)
+                                    name=f"{mm} {landscape_type} Fold ({best_fold[f1id]:.2f}, {best_fold[f2id]:.2f})"), row=1, col=1)
 
             # Heatmap
             fig.add_trace(go.Heatmap(z=mesh, x=f1_folds, y=f2_folds, colorscale=theme, zmin=np.min(mesh)*0.99, zmax=np.max(mesh)*1.01), row=1, col=2)
 
-            # Point on the max score
-            max_index = np.unravel_index(np.argmax(mesh), mesh.shape)
-            max_x = f1_folds[max_index[1]]
-            max_y = f2_folds[max_index[0]]
-            fig.add_trace(go.Scatter(x=[max_x], y=[max_y], mode='markers', 
-                            marker=dict(color='black', size=8), name=f"Max={round(max_score, 2)}", showlegend=False), row=1, col=2)
-            # Point on the predicted score
+            # plot the path of the fold vectors over epochs
+            if trace_path:
+                path = []
+                for i, fold in enumerate(model.fold_history):
+                    if i % path_density == 0:
+                        path.append(fold[layer][[f1id, f2id]])
+                path = np.array(path)
+                fig.add_trace(go.Scatter(x=path[:, 0], y=path[:, 1], mode='markers+lines', 
+                                        marker=dict(color='red', size=2), name="Descent Path"), row=1, col=2)
+            
+            # Point on the max score/min loss
+            best_index = np.unravel_index(np.argmax(mesh), mesh.shape) if landscape_type == "Score" else np.unravel_index(np.argmin(mesh), mesh.shape)
+            best_x = f1_folds[best_index[1]]
+            best_y = f2_folds[best_index[0]]
+            fig.add_trace(go.Scatter(x=[best_x], y=[best_y], mode='markers', 
+                            marker=dict(color='black', size=8), name=f"{mm}={round(best_value, 2)}", showlegend=False), row=1, col=2)
+            # Point on the predicted score/loss
             fig.add_trace(go.Scatter(x=[pred_fold[f1id]], y=[pred_fold[f2id]], mode='markers',
                                      marker=dict(color='red', size=8), name=f"Predicted=NI", showlegend=False), row=1, col=2)
 
@@ -391,7 +407,7 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
             fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=2)
 
             fig.update_layout(height=500, width=1000, 
-                              title_text=f"Layer {score_layer} Visualization", 
+                              title_text=f"Layer {layer} Visualization", 
                               showlegend=True, 
                               legend=dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"))
 
@@ -401,10 +417,10 @@ def iscore_landscape(model, score_layers:int=None, feature_mins: torch.Tensor = 
             fig.show()
 
         # Restore original state
-        model.fold_layers = og_model.fold_layers
-        model.output_layer = og_model.output_layer
+        model.fold_layers = copy.deepcopy(og_model.fold_layers)
+        model.output_layer = copy.deepcopy(og_model.output_layer)
 
-    if len(max_scores) == 1:
-        return max_scores[0], max_features_list[0]
-    return max_scores, max_features_list
+    if len(best_values) == 1:
+        return best_values[0], best_features_list[0]
+    return best_values, best_features_list
    
