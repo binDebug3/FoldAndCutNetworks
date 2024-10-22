@@ -55,15 +55,23 @@ class SigmoidFold(nn.Module):
         n (nn.Parameter): The normal vector of the hyperplane (learnable parameter).
         crease (nn.Parameter or float): The sigmoid scaling factor (learnable or fixed).
     """
-    def __init__(self, crease=None):
+    def __init__(self, width, crease=None):
         super().__init__()
-        self.n = None
-        
+        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+          
         # Initialize crease parameter
         if crease is None:
-            self.crease = nn.Parameter(torch.tensor(1.0))
+            self.crease = nn.Parameter(self.crease_dist())
         else:
             self.register_buffer('crease', torch.tensor(crease))
+            
+    def crease_dist(self, n_samples=1, std=0.5):
+        # Randomly choose which distribution to sample from (50% chance for each mode)
+        mode_selector = torch.randint(0, 2, (n_samples,))
+        left_mode = torch.randn(n_samples) * std - 1
+        right_mode = torch.randn(n_samples) * std + 1
+        return torch.where(mode_selector == 0, left_mode, right_mode)
+    
 
     def forward(self, input):
         """
@@ -75,14 +83,9 @@ class SigmoidFold(nn.Module):
         Returns:
             torch.Tensor: Folded output tensor of shape (batch_size, width).
         """
-        # Initialize the normal vector according to the input width if not already initialized
-        if self.n is None:
-            width = input.shape[1]
-            self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
-        
         # Ensure self.n.norm() is not zero to avoid division by zero
         if self.n.norm() == 0:
-            self.n.data += 1e-8  # Modify the parameter in-place
+            self.n.data += 1e-8
 
         # Compute z_dot_x (batch_size,), n_dot_n (batch_size), and get scales
         z_dot_x = input @ self.n
@@ -115,9 +118,13 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
 
 
 
+
+
+
+
 class OrigamiNetwork(nn.Module):
-    def __init__(self, n_layers = 3, width = None, learning_rate = 0.001, reg = 10, sigmoid = False, optimizer_type = "grad", lr_schedule = False,
-                 batch_size = 32, epochs = 100, leak = 0, crease = 1):
+    def __init__(self, n_layers:int=3, width:int=None, learning_rate:float=0.001, reg:int=10, optimizer_type:str="grad", lr_schedule:bool=False,
+                 batch_size:int=32, epochs:int=100, leak:float=0, crease:float=0, verbose=1):
         
         super(OrigamiNetwork, self).__init__()
 
@@ -131,12 +138,9 @@ class OrigamiNetwork(nn.Module):
         self.width = width
         self.leak = leak
         self.crease = crease
-        self.sigmoid = sigmoid
+        self.verbose = verbose
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(self.device)
-        
-        if self.sigmoid:
-            self.leak =0
 
         # Model parameters (to be initialized later)
         self.input_layer = None
@@ -154,6 +158,10 @@ class OrigamiNetwork(nn.Module):
         self.fold_history = []
         self.learning_rates = []
         self.cut_history = []
+        self.crease_history = []
+        
+        if self.verbose > 1 and self.reg != 0:
+            warnings.warn("Regularization is not implemented yet.")
 
 
     def initialize_layers(self):
@@ -178,7 +186,12 @@ class OrigamiNetwork(nn.Module):
             self.has_expand = False
 
         # Initialize fold vectors and cut layer
-        self.fold_layers = nn.ModuleList([Fold(self.width, self.leak) for _ in range(self.layers)])
+        if self.crease == 0:
+            self.fold_layers = nn.ModuleList([Fold(self.width, self.leak) for _ in range(self.layers)])
+        else:
+            self.fold_layers = nn.ModuleList([SigmoidFold(self.width, self.crease) for _ in range(self.layers)])
+            if self.verbose > 1 and self.leak != 0:
+                warnings.warn("Leaky folds are ignored when crease is nonzero.")
         self.output_layer = nn.Linear(self.width, self.num_classes)
     
     
@@ -227,10 +240,9 @@ class OrigamiNetwork(nn.Module):
         outputs = []
         if self.has_expand:
             Z = D @ self.input_layer.T
-            outputs.append(Z)
         else:
             Z = D
-            outputs.append(Z)
+        outputs.append(Z)
         
         for fold_vector in self.fold_layers:
             Z = fold_vector.forward(Z)
@@ -273,7 +285,7 @@ class OrigamiNetwork(nn.Module):
         self.data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
     
     
-    def fit(self, X=None, y=None, X_val=None, y_val=None, validate=True, history=True, verbose=1):
+    def fit(self, X=None, y=None, X_val=None, y_val=None, validate=True, history=True):
         """
         Trains the model on the input data.
         Parameters:
@@ -295,7 +307,7 @@ class OrigamiNetwork(nn.Module):
                 raise ValueError("Data loader is not defined. Please load data first by calling 'load_data'.")
 
         val_update_wait = max(1, self.epochs // 50)
-        progress = tqdm(total=self.epochs, desc="Training", disable=verbose==0)
+        progress = tqdm(total=self.epochs, desc="Training", disable=self.verbose==0)
         for epoch in range(self.epochs):
             history and self.update_history()
             for batch_X, batch_y in self.data_loader:
@@ -353,14 +365,47 @@ class OrigamiNetwork(nn.Module):
         
         return predicted.numpy()
     
+    def score(self, X, y):
+        """
+        Score the model on the input data
+        Parameters:
+            X (np.ndarray) - The input data
+            y (np.ndarray) - The labels
+        Returns:
+            accuracy (float) - The accuracy of the model on the input data
+        """
+        y_pred = self.predict(X)
+        # convert y_pred to numpy array
+        y = y.numpy() if isinstance(y, torch.Tensor) else y
+        accuracy = (y_pred == y).mean()
+        return accuracy
+    
+    
+    def loss(self, X, y):
+        """
+        Compute the loss of the model on the input data
+        Parameters:
+            X (np.ndarray) - The input data
+            y (np.ndarray) - The labels
+        Returns:
+            loss (float) - The loss of the model on the input data
+        """
+        X = torch.tensor(X, dtype = torch.float32).to(self.device)
+        y = torch.tensor(y, dtype = torch.long).to(self.device)
+        with torch.no_grad():
+            y_hat = self.forward(X)
+            loss = self.loss_fn(y_hat, y)
+        return loss.item()
+    
     
     def update_history(self):
         """
         This function updates the history of the model parameters over each epoch
         """
-        fold_vectors_epoch = [self.to_numpy(fv.n) for fv in self.fold_layers]
-        self.fold_history.append(fold_vectors_epoch)
+        self.fold_history.append( [self.to_numpy(fv.n) for fv in self.fold_layers])
         self.cut_history.append(self.to_numpy(self.output_layer.weight))
+        if self.crease != 0:
+            self.crease_history.append([self.to_numpy(fv.crease) for fv in self.fold_layers])
         
     
     
@@ -372,9 +417,9 @@ class OrigamiNetwork(nn.Module):
         Returns:
             history (list) - The history of the model
         """
-        libary = ["train", "val", "fold", "cut"]
+        libary = ["fold", "cut", "crease", "train", "val"]
         if history is None:
-            return self.train_history, self.val_history, self.fold_history, self.cut_history
+            return self.fold_history, self.cut_history, self.crease_history, self.train_history, self.val_history
         elif history.lower() in libary:
             return getattr(self, f"{history}_history")
         
@@ -443,7 +488,12 @@ class OrigamiNetwork(nn.Module):
         Returns:
             fold_vectors (list) - The fold vectors of the model
         """
-        return [self.to_numpy(fv.n) for fv in self.fold_layers]
+        output = {}
+        for i, fv in enumerate(self.fold_layers):
+            output[f"Layer {i}"] = {"hyperplane": self.to_numpy(fv.n).tolist()}
+            if self.crease != 0:
+                output[f"Layer {i}"]["crease"] = self.to_numpy(fv.crease).tolist()
+        return output
     
     
     def get_cut_vector(self):
