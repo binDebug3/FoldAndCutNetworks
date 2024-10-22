@@ -164,7 +164,7 @@ class OrigamiNetwork(nn.Module):
             warnings.warn("Regularization is not implemented yet.")
 
 
-    def initialize_layers(self):
+    def initialize_layers(self) -> None:
         """
         Initializes the fold layers of the model.
         """
@@ -195,7 +195,7 @@ class OrigamiNetwork(nn.Module):
         self.output_layer = nn.Linear(self.width, self.num_classes)
     
     
-    def encode_y(self, y):
+    def encode_y(self, y) -> None:
         """
         Encodes the labels into one-hot format.
         Parameters:
@@ -209,7 +209,8 @@ class OrigamiNetwork(nn.Module):
         self.num_classes = len(self.classes)
         self.one_hot = F.one_hot(y, num_classes = self.num_classes).float()
     
-    def compile_model(self):
+    
+    def compile_model(self) -> None:
         """
         Compiles the model by initializing the optimizer and loss function.
         """
@@ -227,7 +228,7 @@ class OrigamiNetwork(nn.Module):
         self.loss_fn = nn.CrossEntropyLoss()
 
 
-    def forward(self, D, return_intermediate = False):
+    def forward(self, D, return_intermediate:bool=False) -> torch.Tensor:
         """
         Performs a forward pass of the model.
         Parameters:
@@ -255,7 +256,7 @@ class OrigamiNetwork(nn.Module):
             return logits
     
     
-    def load_data(self, X, y, freeze_folds=False, freeze_cut=False):
+    def load_data(self, X, y, freeze_folds:bool=False, freeze_cut:bool=False) -> None:
         """
         This function loads the data into the model and initializes the data loader.
         Parameters:
@@ -285,7 +286,7 @@ class OrigamiNetwork(nn.Module):
         self.data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
     
     
-    def fit(self, X=None, y=None, X_val=None, y_val=None, validate=True, history=True):
+    def fit(self, X=None, y=None, X_val=None, y_val=None, validate:bool=True, history:bool=True) -> list:
         """
         Trains the model on the input data.
         Parameters:
@@ -331,7 +332,7 @@ class OrigamiNetwork(nn.Module):
         return self.get_history()
 
     
-    def evaluate(self, X_val, y_val):
+    def evaluate(self, X_val, y_val) -> float:
         """
         Evaluates the model on the validation data during training
         Parameters:
@@ -350,7 +351,7 @@ class OrigamiNetwork(nn.Module):
             return accuracy.item()
 
     
-    def predict(self, X):
+    def predict(self, X) -> np.ndarray:
         """
         Predict the labels of the input data
         Parameters:
@@ -358,14 +359,15 @@ class OrigamiNetwork(nn.Module):
         Returns:
             predicted (np.ndarray) - The predicted labels
         """
-        X = torch.tensor(X, dtype = torch.float32).to(self.device)
+        X = torch.tensor(X, dtype=torch.float32).to(self.device) if not isinstance(X, torch.Tensor) \
+                else X.clone().detach().to(self.device)
         with torch.no_grad():
             y_hat = self.forward(X)
             _, predicted = torch.max(y_hat, 1)
-        
         return predicted.numpy()
     
-    def score(self, X, y):
+    
+    def score(self, X, y) -> float:
         """
         Score the model on the input data
         Parameters:
@@ -381,35 +383,39 @@ class OrigamiNetwork(nn.Module):
         return accuracy
     
     
-    def loss(self, X, y):
+    def get_loss(self, X, y) -> float:
         """
         Compute the loss of the model on the input data
         Parameters:
-            X (np.ndarray) - The input data
-            y (np.ndarray) - The labels
+            X (np.ndarray or torch.Tensor) - The input data
+            y (np.ndarray or torch.Tensor) - The labels
         Returns:
             loss (float) - The loss of the model on the input data
         """
-        X = torch.tensor(X, dtype = torch.float32).to(self.device)
-        y = torch.tensor(y, dtype = torch.long).to(self.device)
+        # Convert to tensor only if not already a tensor
+        X = torch.tensor(X, dtype=torch.float32).to(self.device) if not isinstance(X, torch.Tensor) \
+                else X.clone().detach().to(self.device)
+        y = torch.tensor(y, dtype=torch.long).to(self.device) if not isinstance(y, torch.Tensor) \
+                else y.clone().detach().long().to(self.device)
+        
         with torch.no_grad():
             y_hat = self.forward(X)
             loss = self.loss_fn(y_hat, y)
-        return loss.item()
+        return loss
     
     
-    def update_history(self):
+    def update_history(self) -> None:
         """
         This function updates the history of the model parameters over each epoch
         """
-        self.fold_history.append( [self.to_numpy(fv.n) for fv in self.fold_layers])
+        self.fold_history.append([self.to_numpy(fv.n) for fv in self.fold_layers])
         self.cut_history.append(self.to_numpy(self.output_layer.weight))
         if self.crease != 0:
             self.crease_history.append([self.to_numpy(fv.crease) for fv in self.fold_layers])
         
     
     
-    def get_history(self, history:str=None):
+    def get_history(self, history:str=None) -> list:
         """
         Get the history of the model
         Parameters:
@@ -424,7 +430,7 @@ class OrigamiNetwork(nn.Module):
             return getattr(self, f"{history}_history")
         
     
-    def set_folds(self, fold_vectors):
+    def set_folds(self, fold_vectors:list) -> None:
         """
         Set the fold vectors of the model
         Parameters:
@@ -441,7 +447,7 @@ class OrigamiNetwork(nn.Module):
             fold_layer.n = nn.Parameter(fold_vector)
     
     
-    def set_cut(self, cut_vector):
+    def set_cut(self, cut_vector:np.ndarray) -> None:
         """
         Set the cut vector of the model
         Parameters:
@@ -457,7 +463,7 @@ class OrigamiNetwork(nn.Module):
         self.output_layer.weight = nn.Parameter(cut_vector)
 
 
-    def set_params(self, **kwargs):
+    def set_params(self, **kwargs) -> None:
         """
         Set the parameters of the model
         Parameters:
@@ -471,7 +477,7 @@ class OrigamiNetwork(nn.Module):
                 print(f"Could not set {key} to {value}. Error: {e}")
     
     
-    def to_numpy(self, tensor):
+    def to_numpy(self, tensor:torch.Tensor) -> np.ndarray:
         """
         Convert a tensor to a numpy array
         Parameters:
@@ -482,21 +488,23 @@ class OrigamiNetwork(nn.Module):
         return tensor.clone().detach().cpu().numpy()
     
     
-    def get_fold_vectors(self):
+    def get_fold_vectors(self, precision:int=3) -> dict:
         """
         Get the fold vectors of the model
+        Parameters:
+            precision (int) - The precision of the fold vector parameters
         Returns:
             fold_vectors (list) - The fold vectors of the model
         """
         output = {}
         for i, fv in enumerate(self.fold_layers):
-            output[f"Layer {i}"] = {"hyperplane": self.to_numpy(fv.n).tolist()}
+            output[f"Layer {i}"] = {"hyperplane": [round(val, precision) for val in self.to_numpy(fv.n).tolist()]}
             if self.crease != 0:
-                output[f"Layer {i}"]["crease"] = self.to_numpy(fv.crease).tolist()
+                output[f"Layer {i}"]["crease"] = [round(val, precision) for val in self.to_numpy(fv.crease).tolist()]
         return output
     
     
-    def get_cut_vector(self):
+    def get_cut_vector(self) -> np.ndarray:
         """
         Get the cut vector of the model
         Returns:
@@ -531,7 +539,7 @@ class OrigamiNetwork(nn.Module):
         return params
     
     
-    def copy(self, deep=False):
+    def copy(self, deep:bool=False) -> 'OrigamiNetwork':
         """
         Create a copy of the model
 
@@ -550,9 +558,11 @@ class OrigamiNetwork(nn.Module):
         return new_model
 
         
-    def save_weights(self, path="model_weights.pth"):
+    def save_weights(self, path:str="model_weights.pth") -> None:
         """
         Save the weights of the model
+        Parameters:
+            path (str) - The path to save the weights
         """
         assert type(path) == str, "Path must be a string"
         assert path[-4:] == ".pth", "Path must end in '.pth'"
@@ -560,9 +570,11 @@ class OrigamiNetwork(nn.Module):
         torch.save(self.state_dict(), path)
 
 
-    def load_weights(self, path="model_weights.pth"):
+    def load_weights(self, path:str="model_weights.pth") -> None:
         """
         Load the weights of the model
+        Parameters:
+            path (str) - The path to load the weights from
         """
         assert type(path) == str, "Path must be a string"
         assert os.path.exists(path), "File does not exist"
