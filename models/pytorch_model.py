@@ -535,9 +535,8 @@ class OrigamiNetwork(nn.Module):
         self.fold_history.append([self.to_numpy(fv.n) for fv in self.fold_layers])
         self.cut_history.append(self.to_numpy(self.output_layer.weight))
         if self.crease != 0:
-            self.crease_history.append([self.to_numpy(fv.crease) for fv in self.fold_layers])
-    
-    
+            self.crease_history.append([self.to_numpy(torch.tensor([fv.crease])) for fv in self.fold_layers])
+            
     def get_history(self, history:str=None) -> list:
         """
         Get the history of the model
