@@ -1,13 +1,9 @@
-import torch # type: ignore
-import torch.nn as nn # type: ignore
-import torch.optim as optim # type: ignore
+import torch                    # type: ignore
+import torch.nn as nn           # type: ignore
+import torch.optim as optim     # type: ignore
 import torch.nn.functional as F # type: ignore
-import numpy as np # type: ignore
-import plotly.graph_objects as go # type: ignore
-import plotly.express as px # type: ignore
-from plotly.subplots import make_subplots # type: ignore
-import matplotlib.pyplot as plt # type: ignore
-from tqdm import tqdm # type: ignore
+import numpy as np              # type: ignore
+from tqdm import tqdm           # type: ignore
 import warnings
 import os
 import sys
@@ -273,7 +269,6 @@ class OrigamiNetwork(nn.Module):
         self.initialize_layers()
         self.compile_model()
         
-        # TEST
         if freeze_folds:
             for fold_layer in self.fold_layers:
                 for param in fold_layer.parameters():
