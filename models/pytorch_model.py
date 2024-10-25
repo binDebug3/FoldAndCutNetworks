@@ -12,42 +12,66 @@ import warnings
 import os
 import sys
 
-class NoamScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1):
-        self.warmup_steps = warmup_steps
-        self.model_size = model_size
-        super(NoamScheduler, self).__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        step_num = self.last_epoch + 1
-        lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
-        return [lr for _ in self.base_lrs]
-
 
 
 class Fold(nn.Module):
     """
-    This class defines a fold layer in the Origami Network.
-    The fold layer literally folds the data along a hyperplane defined by 'n' in n-dimensional space.
+    A PyTorch module that performs a folding operation on input tensors along a specified direction.
     """
-    def __init__(self, width, leak=0):
+    def __init__(self, width: int, leak: float = 0, fold_in: bool = True, has_stretch: bool = False):
+        """
+        Args:
+            width (int): The expected input dimension.
+            crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
+        """
         super().__init__()
-        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
+        # Hyperparameters
+        self.width = width
         self.leak = leak
-    
-    def forward(self, input):
-        # Ensure norm is non-zero
-        if self.n.norm() == 0:
-            self.n = self.n + 1e-8
+        self.fold_in = fold_in
+        self.has_stretch = has_stretch
+        
+        # Parameters
+        n = torch.randn(self.width) * (2 / self.width) ** 0.5
+        min_norm = 1e-2
+        while n.norm().item() < min_norm:
+            n = torch.randn(self.width) * (2 / self.width) ** 0.5
+        self.n = nn.Parameter(n)
+            
+        # Initialize stretch as a parameter if needed
+        if self.has_stretch:
+            self.stretch = nn.Parameter(torch.tensor(2.0))
+        else:
+            self.register_buffer('stretch', torch.tensor(2.0))
+            
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
+        Returns:
+            folded (torch.Tensor): The transformed tensor after the folding operation.
+        """
+        # pad the input if the width is greater than the input width, raise error if input width is greater than fold width
+        if self.width > input.shape[1]:
+            input = F.pad(input, (0, self.width - input.shape[1]))
+        elif self.width < input.shape[1]:
+            raise ValueError(f"Input dimension ({input.shape[1]}) is greater than fold width ({self.width})")
 
-        # Compute scales and indicator
-        scales = (input @ self.n) / (self.n @ self.n)
-        indicator = (scales > 1).float()
+        # Compute scales
+        eps = 1e-8
+        scales = (input @ self.n) / (self.n @ self.n + eps)
+        
+        # If it is a fold in, we want to fold in the values that are greater than 1
+        if self.fold_in:
+            indicator = (scales > 1).float()
+        else:
+            indicator = (scales < 1).float()
         indicator = indicator + (1 - indicator) * self.leak
 
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
-        return input + 2 * indicator.unsqueeze(1) * (self.n - projection)
+        folded = input + self.stretch * indicator.unsqueeze(1) * (self.n - projection)
+        return folded
        
 
 class SigmoidFold(nn.Module):
@@ -60,20 +84,43 @@ class SigmoidFold(nn.Module):
     Parameters:
         width (int): The dimensionality of the input data.
         crease (float or None): A scaling factor for the sigmoid function. If None, it is set as a learnable parameter.
+        has_stretch (bool): Whether the module allows stretching.
 
     Attributes:
         n (nn.Parameter): The normal vector of the hyperplane (learnable parameter).
         crease (nn.Parameter or float): The sigmoid scaling factor (learnable or fixed).
+        has_stretch (bool): Whether the module allows stretching.
     """
-    def __init__(self, width, crease=None):
+    def __init__(self, width: int, crease: float = None, has_stretch: bool = False):
+        """
+        Args:
+            width (int): The expected input dimension.
+            crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
+        """
         super().__init__()
-        self.n = nn.Parameter(torch.randn(width) * (2 / width) ** 0.5)
-          
+        # Hyperparameters
+        self.width = width
+        self.has_stretch = has_stretch
+        
+        # Parameters
+        n = torch.randn(self.width) * (2 / self.width) ** 0.5
+        min_norm = 1e-2
+        while n.norm().item() < min_norm:
+            n = torch.randn(self.width) * (2 / self.width) ** 0.5
+        self.n = nn.Parameter(n)
+
         # Initialize crease parameter
         if crease is None:
             self.crease = nn.Parameter(self.crease_dist())
         else:
             self.register_buffer('crease', torch.tensor(crease))
+            
+        # Initialize stretch as a parameter if needed
+        if self.has_stretch:
+            self.stretch = nn.Parameter(torch.tensor(2.0))
+        else:
+            self.register_buffer('stretch', torch.tensor(2.0))
+
             
     def crease_dist(self, n_samples=1, std=0.5):
         # Randomly choose which distribution to sample from (50% chance for each mode)
@@ -83,32 +130,36 @@ class SigmoidFold(nn.Module):
         return torch.where(mode_selector == 0, left_mode, right_mode)
     
 
-    def forward(self, input):
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass of the Sigmoid Fold module.
-
-        Parameters:
-            input (torch.Tensor): Input tensor of shape (batch_size, width).
+        Args:
+            input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
 
         Returns:
-            torch.Tensor: Folded output tensor of shape (batch_size, width).
+            output (torch.Tensor): The transformed tensor after the soft folding operation.
         """
-        # Ensure self.n.norm() is not zero to avoid division by zero
-        if self.n.norm() == 0:
-            self.n.data += 1e-8
+        # pad the input if the width is greater than the input width, raise error if input width is greater than fold width
+        if self.width > input.shape[1]:
+            input = F.pad(input, (0, self.width - input.shape[1]))
+        elif self.width < input.shape[1]:
+            raise ValueError(f"Input dimension ({input.shape[1]}) is greater than fold width ({self.width})")
 
-        # Compute z_dot_x (batch_size,), n_dot_n (batch_size), and get scales
-        z_dot_x = input @ self.n
-        n_dot_n = torch.dot(self.n, self.n)
-        scales = z_dot_x / n_dot_n
+        # Small epsilon for numerical stability
+        eps = 1e-8  
 
-        # Compute our sigmoid value (batch_size,)
+        # Compute z_dot_x, n_dot_n, and get scales
+        z_dot_x = input @ self.n  # shape: (batch_size,)
+        n_dot_n = self.n @ self.n + eps  # shape: (1,)
+        scales = z_dot_x / n_dot_n  # shape: (batch_size,)
+
+        # Compute 'p' and sigmoid value (batch_size,)
         p = self.crease * (z_dot_x - n_dot_n)
-        sigmoid = 1 / (1 + torch.exp(-p))
+        p = torch.clamp(p, min=-25.0, max=25.0)
+        sigmoid = torch.sigmoid(p)  # shape: (batch_size,)
 
-        # get the orthogonal projection of the input onto the normal vector and get the output
-        ortho_proj = (1 - scales).unsqueeze(1) * self.n
-        output = input + 2 * sigmoid.unsqueeze(1) * ortho_proj
+        # Get the orthogonal projection of the input onto the normal vector and compute the output
+        ortho_proj = (1 - scales).unsqueeze(1) * self.n  # shape: (batch_size, width)
+        output = input + self.stretch * sigmoid.unsqueeze(1) * ortho_proj  # shape: (batch_size, width)
         return output
 
 
@@ -124,11 +175,8 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
         return [lr for _ in self.base_lrs]
 
 
-
-
-
-
-
+class FlexibleOrigamiNetwork(nn.Module):
+    pass
 
 
 
