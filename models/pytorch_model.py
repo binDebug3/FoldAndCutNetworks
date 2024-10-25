@@ -70,7 +70,7 @@ class Fold(nn.Module):
         return folded
        
 
-class SigmoidFold(nn.Module):
+class SoftFold(nn.Module):
     """
     Sigmoid Fold module.
 
@@ -171,10 +171,6 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
         return [lr for _ in self.base_lrs]
 
 
-class FlexibleOrigamiNetwork(nn.Module):
-    pass
-
-
 
 class OrigamiNetwork(nn.Module):
     def __init__(self, n_layers:int=3, width:int=None, learning_rate:float=0.001, reg:int=10, optimizer_type:str="grad", lr_schedule:bool=False,
@@ -244,7 +240,7 @@ class OrigamiNetwork(nn.Module):
         if self.crease == 0:
             self.fold_layers = nn.ModuleList([Fold(self.width, self.leak) for _ in range(self.layers)])
         else:
-            self.fold_layers = nn.ModuleList([SigmoidFold(self.width, self.crease) for _ in range(self.layers)])
+            self.fold_layers = nn.ModuleList([SoftFold(self.width, self.crease) for _ in range(self.layers)])
             if self.verbose > 1 and self.leak != 0:
                 warnings.warn("Leaky folds are ignored when crease is nonzero.")
         self.output_layer = nn.Linear(self.width, self.num_classes)
