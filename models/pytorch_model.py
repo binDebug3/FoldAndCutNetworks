@@ -348,7 +348,9 @@ class OrigamiNetwork(nn.Module):
         self.data_loader = torch.utils.data.DataLoader(dataset, batch_size = self.batch_size, shuffle = True)
     
     
-    def fit(self, X=None, y=None, X_val=None, y_val=None, validate:bool=True, history:bool=True) -> list:
+    def fit(self, X=None, y=None, X_val=None, y_val=None, 
+            validate:bool=True, history:bool=True, val_update_rate:int=2, 
+            early_stopping:bool=True, patience:int=10, convergence_tol:float=1e-3) -> list:
         """
         Trains the model on the input data.
         Parameters:
@@ -358,7 +360,10 @@ class OrigamiNetwork(nn.Module):
             y_val (np.ndarray) - The validation labels
             validate (bool) - Whether to validate the model during training
             history (bool) - Whether to save the performance and parameter history
-            verbose (int) - The verbosity level of the training
+            val_update_rate (int) - The rate at which to update the validation data
+            early_stopping (bool) - Whether to use early stopping
+            patience (int) - The number of epochs to wait before stopping
+            convergence_tol (float) - The tolerance for convergence
         Returns:
             history (list) - The training history of the model
         """
@@ -369,10 +374,13 @@ class OrigamiNetwork(nn.Module):
             else:
                 raise ValueError("Data loader is not defined. Please load data first by calling 'load_data'.")
 
-        val_update_wait = max(1, self.epochs // 50)
+        val_update_wait = max(1, (self.epochs * val_update_rate) // 100)
         progress = tqdm(total=self.epochs, desc="Training", disable=self.verbose==0)
+        slow_epochs = 0
+        prev_params = self.get_model_params()
         for epoch in range(self.epochs):
             history and self.update_history()
+            
             for batch_X, batch_y in self.data_loader:
                 batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device, dtype=torch.long)
                 self.optimizer.zero_grad()
@@ -385,10 +393,32 @@ class OrigamiNetwork(nn.Module):
                     self.schedule.step()
                 lr = self.optimizer.param_groups[0]['lr']
                 self.learning_rates.append(lr)
-            if validate and epoch % val_update_wait == 0 and X_val is not None and y_val is not None:
-                acc = self.evaluate(X_val, y_val)
-                history and self.val_history.append(acc)
-                progress.set_description(f"Val Accuracy: {round(acc, 4)}")                
+            
+            if validate and epoch % val_update_wait == 0:
+                train_acc = self.evaluate(self.X, self.y)
+                history and self.train_history.append(train_acc)
+                
+                if X_val is not None and y_val is not None:
+                    val_acc = self.evaluate(X_val, y_val)
+                    history and self.val_history.append(val_acc)
+                    progress.set_description(f"Train Accuracy: {round(train_acc, 4)} | Val Accuracy: {round(val_acc, 4)}")
+                else:
+                    progress.set_description(f"Train Accuracy: {round(train_acc, 4)}")             
+
+            if early_stopping:
+                params = self.get_model_params()
+                params_diff = self.param_diff(prev_params, params)
+                prev_params = params
+                if params_diff < convergence_tol:
+                    slow_epochs += 1
+                else:
+                    slow_epochs = 0
+                if slow_epochs >= patience:
+                    if self.verbose > 1:
+                        print(f"Early stopping at epoch {epoch}")
+                    break
+                prev_params = params
+            
             progress.update(1)
         progress.close()
         return self.get_history()
@@ -403,8 +433,10 @@ class OrigamiNetwork(nn.Module):
         Returns:
             accuracy (float) - The accuracy of the model on the validation data
         """
-        X_val = torch.tensor(X_val, dtype = torch.float32).to(self.device)
-        y_val = torch.tensor(y_val, dtype = torch.long).to(self.device)
+        X_val = torch.tensor(X_val, dtype = torch.float32).to(self.device) if not isinstance(X_val, torch.Tensor) \
+                else X_val.clone().detach().to(self.device)
+        y_val = torch.tensor(y_val, dtype = torch.long).to(self.device) if not isinstance(y_val, torch.Tensor) \
+                else y_val.clone().detach().long().to(self.device)
 
         with torch.no_grad():
             y_hat = self.forward(X_val)
@@ -439,10 +471,8 @@ class OrigamiNetwork(nn.Module):
             accuracy (float) - The accuracy of the model on the input data
         """
         y_pred = self.predict(X)
-        # convert y_pred to numpy array
         y = y.numpy() if isinstance(y, torch.Tensor) else y
-        accuracy = (y_pred == y).mean()
-        return accuracy
+        return (y_pred == y).mean()
     
     
     def get_loss(self, X, y) -> float:
@@ -466,6 +496,38 @@ class OrigamiNetwork(nn.Module):
         return loss
     
     
+    def get_gradients(self, X=None, y=None, layer=0) -> list:
+        """
+        This function returns the gradients of the model parameters
+        Parameters:
+            layer (int) - The layer to get the gradients for
+        Returns:
+            gradients (list) - The gradients of the model parameters
+        """
+        assert type(layer) == int, "Layer must be an integer"
+        assert 0 <= layer < self.layers, f"Layer {layer} does not exist in the model"
+
+        X = self.X if X is None else X
+        y = self.y if y is None else y
+        X = torch.tensor(X, dtype=torch.float32).to(self.device) if not isinstance(X, torch.Tensor) \
+                else X.clone().detach().to(self.device)
+        y = torch.tensor(y, dtype=torch.long).to(self.device) if not isinstance(y, torch.Tensor) \
+                else y.clone().detach().long().to(self.device)
+        
+        self.zero_grad()
+        y_pred = self.forward(X)
+        loss = self.loss_fn(y_pred, y)
+        loss.backward()
+        
+        query = f'fold_layers.{layer}.n'
+        for name, param in self.named_parameters():
+            if name == query:
+                return param.grad.numpy()
+        if self.verbose > 1:
+            print(f"Could not find gradients for '{query}'")
+        return None
+    
+    
     def update_history(self) -> None:
         """
         This function updates the history of the model parameters over each epoch
@@ -474,7 +536,6 @@ class OrigamiNetwork(nn.Module):
         self.cut_history.append(self.to_numpy(self.output_layer.weight))
         if self.crease != 0:
             self.crease_history.append([self.to_numpy(fv.crease) for fv in self.fold_layers])
-        
     
     
     def get_history(self, history:str=None) -> list:
@@ -490,6 +551,27 @@ class OrigamiNetwork(nn.Module):
             return self.fold_history, self.cut_history, self.crease_history, self.train_history, self.val_history
         elif history.lower() in libary:
             return getattr(self, f"{history}_history")
+        
+    
+    def get_model_params(self) -> torch.Tensor:
+        """
+        Get the model parameters
+        Returns:
+            params (torch.Tensor) - The model parameters
+        """
+        return torch.cat([param.view(-1) for param in self.parameters()])
+    
+    
+    def param_diff(self, params1:torch.Tensor, params2:torch.Tensor) -> float:
+        """
+        Compute the difference between two sets of parameters
+        Parameters:
+            params1 (torch.Tensor) - The first set of parameters
+            params2 (torch.Tensor) - The second set of parameters
+        Returns:
+            diff (float) - The difference between the two sets of parameters
+        """
+        return torch.norm(params1 - params2).item()
         
     
     def set_folds(self, fold_vectors:list) -> None:
