@@ -492,7 +492,7 @@ def gradient_landscape(model, show_layers:int=None, feature_mins:torch.Tensor=No
         for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"Gradient Layer {layer}"):
             model.fold_layers[layer].n = nn.Parameter(features.clone().detach().to(model.device))
             model.output_layer.load_state_dict(og_model.output_layer.state_dict())
-            gradients.append(model.get_gradients(layer=layer))
+            gradients.append(np.abs(model.get_gradients(layer=layer)))
         gradients = np.array(gradients)
 
         # Create a heatmap of the score/loss landscape for features f1id and f2id
@@ -511,14 +511,20 @@ def gradient_landscape(model, show_layers:int=None, feature_mins:torch.Tensor=No
                     x_mesh[j, i] = gradients[matching_indices[0], 0]  # Select first match (adjust if needed)
                     y_mesh[j, i] = gradients[matching_indices[0], 1]
         # normalize the mesh to RGB values
-        x_mesh = (x_mesh - np.min(x_mesh)) / (np.max(x_mesh) - np.min(x_mesh)) * 255
+        
+        # x_mesh = (x_mesh - np.min(x_mesh)) / (np.max(x_mesh) - np.min(x_mesh)) * 255
+        x_mesh = x_mesh / np.max(x_mesh) * 255
         x_mesh = x_mesh.astype(np.uint8)
-        y_mesh = (y_mesh - np.min(y_mesh)) / (np.max(y_mesh) - np.min(y_mesh)) * 255
+        # y_mesh = (y_mesh - np.min(y_mesh)) / (np.max(y_mesh) - np.min(y_mesh)) * 255
+        y_mesh = y_mesh / np.max(y_mesh) * 255
         y_mesh = y_mesh.astype(np.uint8)
         if invert:
             x_mesh = 255 - x_mesh
             y_mesh = 255 - y_mesh
-        rgb_image = np.stack([x_mesh, np.zeros_like(x_mesh), y_mesh], axis=-1)
+            scalar = 200
+        else:
+            scalar = 0
+        rgb_image = np.stack([x_mesh, scalar * np.ones_like(x_mesh), y_mesh], axis=-1)
 
         # create fold data
         offset = 1 if model.has_expand else 0
