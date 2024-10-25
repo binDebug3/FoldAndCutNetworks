@@ -46,9 +46,9 @@ class DynamicOrigami(nn.Module):
             cut = nn.Linear(in_features, self.num_classes)
             self.layers.append(cut)
             
-        except KeyError as e:
-            print(f"--KeyError--\nMissing key: {e}\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
-            raise e
+        except:
+            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
+            raise KeyError
         
         
     def forward(self, x):
