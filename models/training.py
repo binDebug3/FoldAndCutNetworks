@@ -4,11 +4,25 @@ import torch.optim as optim # type: ignore
 import torch.nn.functional as F # type: ignore
 import numpy as np # type: ignore
 from tqdm import tqdm # type: ignore
+from torch.utils.data import TensorDataset, DataLoader # type: ignore
 
 
 
 
-################################# Data Prep #####################################
+################################# Data Prep #####################################        
+def load_data(x_data, y_data, batch_size=32, shuffle=True) -> torch.utils.data.DataLoader:
+    # Convert x and y data to PyTorch tensors if they aren’t already
+    x_tensor = torch.tensor(x_data, dtype=torch.float32)  # Specify float32 for model compatibility
+    y_tensor = torch.tensor(y_data, dtype=torch.long)     # Specify long for classification labels
+
+    # Create a TensorDataset
+    dataset = TensorDataset(x_tensor, y_tensor)
+    
+    # Create the DataLoader
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return dataloader
+
+# TODO: Fix the following function to robustly handle different types of label data
 # def encode_y(y, DEVICE) -> torch.Tensor:
 #         """
 #         Encodes the labels into one-hot format.
@@ -23,26 +37,7 @@ from tqdm import tqdm # type: ignore
 #         num_classes = len(classes)
 #         one_hot = F.one_hot(y, num_classes).float()
 #         return one_hot
-       
-        
-# def load_data(X, y, batch_size, DEVICE) -> torch.utils.data.DataLoader:
-#     """
-#     This function loads the data into the model and initializes the data loader.
-#     Parameters:
-#         X (np.ndarray) - The input data
-#         y (np.ndarray) - The labels
-#         freeze_folds (bool) - Whether to freeze the fold layers during training
-#         freeze_cut (bool) - Whether to freeze the cut layer during training
-#     """
-#     X = X.clone().detach().to(DEVICE) if isinstance(X, torch.Tensor) \
-#         else torch.tensor(X, dtype=torch.float32).to(DEVICE)
-#     y = y.clone().detach().to(DEVICE) if isinstance(y, torch.Tensor) \
-#         else torch.tensor(y, dtype=torch.long).to(DEVICE)
 
-#     dataset = torch.utils.data.TensorDataset(X, y)
-#     data_loader = torch.utils.data.DataLoader(dataset, batch_size = batch_size, shuffle = True)
-    
-#     return data_loader
 
 
 
