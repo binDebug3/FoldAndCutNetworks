@@ -139,7 +139,7 @@ def plot_folds(model, layer_index=0, use_plotly=False):
 
 
 
-def plot_wiggles(fold_histories, crease_histories=[], layer=0):
+def plot_wiggles(fold_histories, crease_histories=[], train_histories=[], val_histories=[], layer=0):
     """
     This function plots the first and second parameters of a fold layer over epochs
     Parameters:
@@ -148,16 +148,37 @@ def plot_wiggles(fold_histories, crease_histories=[], layer=0):
     """
     x_wiggles = [x[layer][0] for x in fold_histories]
     y_wiggles = [x[layer][1] for x in fold_histories]
+    subplot_titles = ["X Wiggles", "Y Wiggles"]
+    
+    cc = 2
     if len(crease_histories) > 0:
         crease_wiggles = [x[layer][0] for x in crease_histories]
-        cc = 3
-    else:
-        cc = 2
-    fig = make_subplots(rows=1, cols=cc, subplot_titles=("X Wiggles", "Y Wiggles"))
+        cc += 1
+        subplot_titles.append("Crease Wiggles")
+    if len(train_histories) > 0:
+        train_wiggles = train_histories
+        cc += 1
+        subplot_titles.append("Training")
+    if len(val_histories) > 0:
+        val_wiggles = train_histories
+        cc += 1
+        subplot_titles.append("Validation")
+        
+    fig = make_subplots(rows=1, cols=cc, subplot_titles=subplot_titles)
+    index = 2
     fig.add_trace(go.Scatter(y=x_wiggles, mode='lines', name='x_wiggles'), row=1, col=1)
     fig.add_trace(go.Scatter(y=y_wiggles, mode='lines', name='y_wiggles'), row=1, col=2)
-    if cc == 3:
-        fig.add_trace(go.Scatter(y=crease_wiggles, mode='lines', name='crease_wiggles'), row=1, col=3)
+    
+    if "Crease Wiggles" in subplot_titles:
+        index += 1
+        fig.add_trace(go.Scatter(y=crease_wiggles, mode='lines', name='crease_wiggles'), row=1, col=index)
+    if "Training" in subplot_titles:
+        index += 1
+        fig.add_trace(go.Scatter(y=train_wiggles, mode='lines', name='Training'), row=1, col=index)
+    if "Validation" in subplot_titles:
+        index += 1
+        fig.add_trace(go.Scatter(y=val_wiggles, mode='lines', name='Validation'), row=1, col=index)
+    
     fig.update_layout(width=1000, height=400, title_text=f'Fold layer {layer} over epochs')
     for i in range(1, cc+1):
         fig.update_xaxes(title_text="Epoch", row=1, col=i)
@@ -274,7 +295,7 @@ def plot_history(model, n_folds=50, include_cut=True, verbose=1):
 
 
 def create_landscape(model, landscape_type:str="Score", show_layers:int=None, feature_mins:torch.Tensor=None, feature_maxes:torch.Tensor=None, 
-                     density:int=10, f1id:int=0, f2id:int=1, create_plot:bool=False, png_path:str=None, theme:str="viridis",
+                     density:int=10, f1id:int=0, f2id:int=1, png_path:str=None, theme:str="viridis",
                      trace_path:bool=True, path_density:int=10, verbose:int=1):
     """
     Visualizes the score landscape of the model for a given layer and two features.
@@ -288,7 +309,6 @@ def create_landscape(model, landscape_type:str="Score", show_layers:int=None, fe
         density (int) - The number of points to calculate the score for
         f1id (int) - The id of the first feature to calculate the score for
         f2id (int) - The id of the second feature to calculate the score for
-        create_plot (bool) - Whether to create a plot of the score landscape
         png_path (str) - The path to save the plot to
         theme (str) - The theme of the plot
         trace_path (bool) - Whether to trace the path of the model fold vectors
@@ -310,8 +330,8 @@ def create_landscape(model, landscape_type:str="Score", show_layers:int=None, fe
     show_layers = show_layers if isinstance(show_layers, list) else [show_layers] if isinstance(show_layers, int) else [l for l in range(model.layers)]
 
     # Input error handling
-    assert isinstance(X, torch.Tensor) and X.ndim == 2, f"X must be a 2D PyTorch tensor. Instead got {landscape_type(X)}"
-    assert isinstance(y, torch.Tensor), f"y must be a PyTorch tensor. Instead got {landscape_type(y)}"
+    assert isinstance(X, torch.Tensor) and X.ndim == 2, f"X must be a 2D PyTorch tensor. Instead got {type(X)}"
+    assert isinstance(y, torch.Tensor), f"y must be a PyTorch tensor. Instead got {type(y)}"
     assert isinstance(show_layers, list) and len(show_layers) > 0 and isinstance(show_layers[0], int), f"show_layers must be a list of integers. Instead got {show_layers}"
     
     # Create a grid of features (use torch.linspace instead of np.linspace)
@@ -342,79 +362,78 @@ def create_landscape(model, landscape_type:str="Score", show_layers:int=None, fe
         best_features_list.append(feature_combinations[best_index])
 
         # Create a heatmap of the score/loss landscape for features f1id and f2id
-        if create_plot:
-            f1 = feature_combinations[:, f1id].cpu().numpy()
-            f2 = feature_combinations[:, f2id].cpu().numpy()
-            f1_folds = feature_folds[f1id].cpu().numpy()
-            f2_folds = feature_folds[f2id].cpu().numpy()
+        f1 = feature_combinations[:, f1id].cpu().numpy()
+        f2 = feature_combinations[:, f2id].cpu().numpy()
+        f1_folds = feature_folds[f1id].cpu().numpy()
+        f2_folds = feature_folds[f2id].cpu().numpy()
 
-            # Get the heatmap data
-            mesh = np.zeros((len(f2_folds), len(f1_folds)))
-            for i, f1_val in enumerate(f1_folds):
-                for j, f2_val in enumerate(f2_folds):
-                    mesh[j, i] = values[(f1 == f1_val) & (f2 == f2_val)].item()
+        # Get the heatmap data
+        mesh = np.zeros((len(f2_folds), len(f1_folds)))
+        for i, f1_val in enumerate(f1_folds):
+            for j, f2_val in enumerate(f2_folds):
+                mesh[j, i] = values[(f1 == f1_val) & (f2 == f2_val)].item()
 
-            offset = 1 if model.has_expand else 0
-            model.fold_layers = copy.deepcopy(og_model.fold_layers)
-            _, paper = model.forward(X, return_intermediate=True)
-            outx = paper[offset + layer][:, f1id].detach().numpy()
-            outy = paper[offset + layer][:, f2id].detach().numpy()
+        offset = 1 if model.has_expand else 0
+        model.fold_layers = copy.deepcopy(og_model.fold_layers)
+        _, paper = model.forward(X, return_intermediate=True)
+        outx = paper[offset + layer][:, f1id].detach().numpy()
+        outy = paper[offset + layer][:, f2id].detach().numpy()
 
-            # Create subplots
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Input Data", f"{landscape_type} Landscape"), 
-                                specs=[[{"type": "scatter"}, {"type": "heatmap"}]])
+        # Create subplots
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Input Data", f"{landscape_type} Landscape"), 
+                            specs=[[{"type": "scatter"}, {"type": "heatmap"}]])
 
-            # Scatter plot with colors
-            fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', 
-                                    marker=dict(color=y.cpu().numpy().astype(int)*0.5 + 0.2, colorscale=theme, size=8), 
-                                    name="Data", showlegend=False), row=1, col=1)
+        # Scatter plot with colors
+        fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', 
+                                marker=dict(color=y.cpu().numpy().astype(int)*0.5 + 0.2, colorscale=theme, size=8), 
+                                name="Data", showlegend=False), row=1, col=1)
 
-            # Add predicted and best folds
-            pred_fold = og_model.fold_layers[layer].n.detach().numpy()
-            best_fold = best_features_list[-1].cpu().numpy()
-            fig.add_trace(idraw_fold(pred_fold, outx, outy, color="magenta", 
-                                    name=f"Predicted Fold ({pred_fold[f1id]:.2f}, {pred_fold[f2id]:.2f})"), row=1, col=1)
-            fig.add_trace(idraw_fold(best_fold, outx, outy, color="black", 
-                                    name=f"{mm} {landscape_type} Fold ({best_fold[f1id]:.2f}, {best_fold[f2id]:.2f})"), row=1, col=1)
+        # Add predicted and best folds
+        pred_fold = og_model.fold_layers[layer].n.detach().numpy()
+        best_fold = best_features_list[-1].cpu().numpy()
+        fig.add_trace(idraw_fold(pred_fold, outx, outy, color="magenta", 
+                                name=f"Predicted Fold ({pred_fold[f1id]:.2f}, {pred_fold[f2id]:.2f})"), row=1, col=1)
+        fig.add_trace(idraw_fold(best_fold, outx, outy, color="black", 
+                                name=f"{mm} {landscape_type} Fold ({best_fold[f1id]:.2f}, {best_fold[f2id]:.2f})"), row=1, col=1)
 
-            # Heatmap
-            fig.add_trace(go.Heatmap(z=mesh, x=f1_folds, y=f2_folds, colorscale=theme, zmin=np.min(mesh)*0.99, zmax=np.max(mesh)*1.01), row=1, col=2)
+        # Heatmap
+        fig.add_trace(go.Heatmap(z=mesh, x=f1_folds, y=f2_folds, colorscale=theme, zmin=np.min(mesh)*0.99, zmax=np.max(mesh)*1.01), row=1, col=2)
 
-            # plot the path of the fold vectors over epochs
-            if trace_path:
-                path = []
-                for i, fold in enumerate(model.fold_history):
-                    if i % path_density == 0:
-                        path.append(fold[layer][[f1id, f2id]])
-                path = np.array(path)
-                fig.add_trace(go.Scatter(x=path[:, 0], y=path[:, 1], mode='markers+lines', 
-                                        marker=dict(color='red', size=2), name="Descent Path"), row=1, col=2)
-            
-            # Point on the max score/min loss
-            best_index = np.unravel_index(np.argmax(mesh), mesh.shape) if landscape_type == "Score" else np.unravel_index(np.argmin(mesh), mesh.shape)
-            best_x = f1_folds[best_index[1]]
-            best_y = f2_folds[best_index[0]]
-            fig.add_trace(go.Scatter(x=[best_x], y=[best_y], mode='markers', 
-                            marker=dict(color='black', size=8), name=f"{mm}={round(best_value, 2)}", showlegend=False), row=1, col=2)
-            # Point on the predicted score/loss
-            fig.add_trace(go.Scatter(x=[pred_fold[f1id]], y=[pred_fold[f2id]], mode='markers',
-                                     marker=dict(color='red', size=8), name=f"Predicted=NI", showlegend=False), row=1, col=2)
+        # plot the path of the fold vectors over epochs
+        if trace_path:
+            path = []
+            for i, fold in enumerate(model.fold_history):
+                if i % path_density == 0:
+                    path.append(fold[layer][[f1id, f2id]])
+            path = np.array(path)
+            fig.add_trace(go.Scatter(x=path[:, 0], y=path[:, 1], mode='markers+lines', 
+                                    marker=dict(color='red', size=2), name="Descent Path"), row=1, col=2)
+        
+        # Point on the max score/min loss
+        best_index = np.unravel_index(np.argmax(mesh), mesh.shape) if landscape_type == "Score" else np.unravel_index(np.argmin(mesh), mesh.shape)
+        best_x = f1_folds[best_index[1]]
+        best_y = f2_folds[best_index[0]]
+        fig.add_trace(go.Scatter(x=[best_x], y=[best_y], mode='markers', 
+                        marker=dict(color='black', size=8), name=f"{mm}={round(best_value, 2)}", showlegend=False), row=1, col=2)
+        # Point on the predicted score/loss
+        fig.add_trace(go.Scatter(x=[pred_fold[f1id]], y=[pred_fold[f2id]], mode='markers',
+                                    marker=dict(color='red', size=8), name=f"Predicted=NI", showlegend=False), row=1, col=2)
 
-            # Update layout
-            fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=1)
-            fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=1)
-            fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=2)
-            fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=2)
+        # Update layout
+        fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=1)
+        fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=1)
+        fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=2)
+        fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=2)
 
-            fig.update_layout(height=500, width=1000, 
-                              title_text=f"Layer {layer} Visualization", 
-                              showlegend=True, 
-                              legend=dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"))
+        fig.update_layout(height=500, width=1000, 
+                            title_text=f"Layer {layer} Visualization", 
+                            showlegend=True, 
+                            legend=dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"))
 
-            # Save plot if png_path is provided
-            if png_path:
-                fig.write_image(png_path)
-            fig.show()
+        # Save plot if png_path is provided
+        if png_path:
+            fig.write_image(png_path)
+        fig.show()
 
         # Restore original state
         model.fold_layers = copy.deepcopy(og_model.fold_layers)
@@ -423,4 +442,130 @@ def create_landscape(model, landscape_type:str="Score", show_layers:int=None, fe
     if len(best_values) == 1:
         return best_values[0], best_features_list[0]
     return best_values, best_features_list
+
+
+
+
+def gradient_landscape(model, show_layers:int=None, feature_mins:torch.Tensor=None, feature_maxes:torch.Tensor=None, 
+                     density:int=10, f1id:int=0, f2id:int=1, png_path:str=None, theme:str="viridis",
+                     invert:bool=False, verbose:int=1) -> None:
+    """
+    Visualizes the score landscape of the model for a given layer and two features.
+    
+    Parameters:
+        model (OrigamiNetwork) - The model to visualize
+        show_layers (int or list) - The layer(s) to calculate the score for
+        feature_mins (torch.Tensor) - The minimum values for each feature
+        feature_maxes (torch.Tensor) - The maximum values for each feature
+        density (int) - The number of points to calculate the score for
+        f1id (int) - The id of the first feature to calculate the score for
+        f2id (int) - The id of the second feature to calculate the score for
+        png_path (str) - The path to save the plot to
+        theme (str) - The theme of the plot
+        invert (bool) - Whether to invert the gradient colors
+        verbose (int) - Whether to show the progress of the training (default is 1)
+    """
+    # Set default values
+    og_model = copy.deepcopy(model)
+    X = model.X
+    y = model.y
+    density += 1 if density % 2 == 1 else 0 # doesn't work if density is odd for some reason
+    density = [density] * X.shape[1] if density is not None else [10] * X.shape[1]
+    feature_mins = feature_mins if feature_mins is not None else torch.min(X, dim=0).values
+    feature_maxes = feature_maxes if feature_maxes is not None else torch.max(X, dim=0).values
+    show_layers = show_layers if isinstance(show_layers, list) else [show_layers] if isinstance(show_layers, int) else [l for l in range(model.layers)]
+
+    # Input error handling
+    assert isinstance(X, torch.Tensor) and X.ndim == 2, f"X must be a 2D PyTorch tensor. Instead got {type(X)}"
+    assert isinstance(y, torch.Tensor), f"y must be a PyTorch tensor. Instead got {type(y)}"
+    assert isinstance(show_layers, list) and len(show_layers) > 0 and isinstance(show_layers[0], int), f"show_layers must be a list of integers. Instead got {show_layers}"
+    
+    # Create a grid of features (use torch.linspace instead of np.linspace)
+    feature_folds = []
+    for mins, maxes, d in zip(feature_mins, feature_maxes, density):
+        feature_folds.append(torch.linspace(mins.item(), maxes.item(), d))
+
+    # Use torch.meshgrid to get feature combinations
+    feature_combinations = torch.cartesian_prod(*feature_folds)
+    for layer in show_layers:
+        gradients = []
+        for features in tqdm(feature_combinations, position=0, leave=True, disable=verbose==0, desc=f"Gradient Layer {layer}"):
+            model.fold_layers[layer].n = nn.Parameter(features.clone().detach().to(model.device))
+            model.output_layer.load_state_dict(og_model.output_layer.state_dict())
+            gradients.append(np.abs(model.get_gradients(layer=layer)))
+        gradients = np.array(gradients)
+
+        # Create a heatmap of the score/loss landscape for features f1id and f2id
+        f1 = feature_combinations[:, f1id].cpu().numpy()
+        f2 = feature_combinations[:, f2id].cpu().numpy()
+        f1_folds = feature_folds[f1id].cpu().numpy()
+        f2_folds = feature_folds[f2id].cpu().numpy()
+
+        # Get the heatmap data for gradient
+        x_mesh = np.zeros((len(f2_folds), len(f1_folds)))
+        y_mesh = np.zeros((len(f2_folds), len(f1_folds)))
+        for i, f1_val in enumerate(f1_folds):
+            for j, f2_val in enumerate(f2_folds):
+                matching_indices = np.where((f1 == f1_val) & (f2 == f2_val))[0]
+                if len(matching_indices) > 0:  # Ensure there's at least one match
+                    x_mesh[j, i] = gradients[matching_indices[0], 0]  # Select first match (adjust if needed)
+                    y_mesh[j, i] = gradients[matching_indices[0], 1]
+        # normalize the mesh to RGB values
+        
+        # x_mesh = (x_mesh - np.min(x_mesh)) / (np.max(x_mesh) - np.min(x_mesh)) * 255
+        x_mesh = x_mesh / np.max(x_mesh) * 255
+        x_mesh = x_mesh.astype(np.uint8)
+        # y_mesh = (y_mesh - np.min(y_mesh)) / (np.max(y_mesh) - np.min(y_mesh)) * 255
+        y_mesh = y_mesh / np.max(y_mesh) * 255
+        y_mesh = y_mesh.astype(np.uint8)
+        if invert:
+            x_mesh = 255 - x_mesh
+            y_mesh = 255 - y_mesh
+            scalar = 200
+        else:
+            scalar = 0
+        rgb_image = np.stack([x_mesh, scalar * np.ones_like(x_mesh), y_mesh], axis=-1)
+
+        # create fold data
+        offset = 1 if model.has_expand else 0
+        model.fold_layers = copy.deepcopy(og_model.fold_layers)
+        _, paper = model.forward(X, return_intermediate=True)
+        outx = paper[offset + layer][:, f1id].detach().numpy()
+        outy = paper[offset + layer][:, f2id].detach().numpy()
+
+        # Create subplots
+        fig = make_subplots(rows=1, cols=2, subplot_titles=("Input Data", f"Gradient Landscape"), 
+                            specs=[[{"type": "scatter"}, {"type": "heatmap"}]])
+
+        # Scatter plot with colors
+        fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', 
+                                marker=dict(color=y.cpu().numpy().astype(int)*0.5 + 0.2, colorscale=theme, size=8), 
+                                name="Data", showlegend=False), row=1, col=1)
+        # Add predicted folds
+        pred_fold = og_model.fold_layers[layer].n.detach().numpy()
+        fig.add_trace(idraw_fold(pred_fold, outx, outy, color="magenta", 
+                                name=f"Predicted Fold ({pred_fold[f1id]:.2f}, {pred_fold[f2id]:.2f})"), row=1, col=1)
+        # Heatmap
+        fig.add_trace(go.Image(z=rgb_image), row=1, col=2)
+
+
+        # Update layout
+        fig.update_xaxes(title_text=f"Feature {f1id}", row=1, col=1)
+        fig.update_yaxes(title_text=f"Feature {f2id}", row=1, col=1)
+        fig.update_xaxes(title_text=f"X Gradient = Red", row=1, col=2)
+        fig.update_yaxes(title_text=f"Y Gradient = Blue", row=1, col=2)
+        fig.update_layout(height=500, width=1000, 
+                            title_text=f"Layer {layer} Visualization", 
+                            showlegend=True, 
+                            legend=dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"))
+
+        # Save plot if png_path is provided
+        if png_path:
+            fig.write_image(png_path)
+        fig.show()
+
+        # Restore original state
+        model.fold_layers = copy.deepcopy(og_model.fold_layers)
+        model.output_layer = copy.deepcopy(og_model.output_layer)
+    return None
    
