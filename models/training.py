@@ -9,40 +9,40 @@ from tqdm import tqdm # type: ignore
 
 
 ################################# Data Prep #####################################
-def encode_y(y, DEVICE) -> torch.Tensor:
-        """
-        Encodes the labels into one-hot format.
-        Parameters:
-            y (np.ndarray) - The labels
-        """
-        # if type(y) == np.ndarray:
-        #     y = torch.tensor(y)
-        y = y.clone().detach().to(DEVICE, dtype=torch.long) if isinstance(y, torch.Tensor) \
-            else torch.tensor(y, dtype=torch.long).to(DEVICE)
-        classes = torch.unique(y)
-        num_classes = len(classes)
-        one_hot = F.one_hot(y, num_classes).float()
-        return one_hot
+# def encode_y(y, DEVICE) -> torch.Tensor:
+#         """
+#         Encodes the labels into one-hot format.
+#         Parameters:
+#             y (np.ndarray) - The labels
+#         """
+#         # if type(y) == np.ndarray:
+#         #     y = torch.tensor(y)
+#         y = y.clone().detach().to(DEVICE, dtype=torch.long) if isinstance(y, torch.Tensor) \
+#             else torch.tensor(y, dtype=torch.long).to(DEVICE)
+#         classes = torch.unique(y)
+#         num_classes = len(classes)
+#         one_hot = F.one_hot(y, num_classes).float()
+#         return one_hot
        
         
-def load_data(X, y, batch_size, DEVICE) -> torch.utils.data.DataLoader:
-    """
-    This function loads the data into the model and initializes the data loader.
-    Parameters:
-        X (np.ndarray) - The input data
-        y (np.ndarray) - The labels
-        freeze_folds (bool) - Whether to freeze the fold layers during training
-        freeze_cut (bool) - Whether to freeze the cut layer during training
-    """
-    X = X.clone().detach().to(DEVICE) if isinstance(X, torch.Tensor) \
-        else torch.tensor(X, dtype=torch.float32).to(DEVICE)
-    y = y.clone().detach().to(DEVICE) if isinstance(y, torch.Tensor) \
-        else torch.tensor(y, dtype=torch.long).to(DEVICE)
+# def load_data(X, y, batch_size, DEVICE) -> torch.utils.data.DataLoader:
+#     """
+#     This function loads the data into the model and initializes the data loader.
+#     Parameters:
+#         X (np.ndarray) - The input data
+#         y (np.ndarray) - The labels
+#         freeze_folds (bool) - Whether to freeze the fold layers during training
+#         freeze_cut (bool) - Whether to freeze the cut layer during training
+#     """
+#     X = X.clone().detach().to(DEVICE) if isinstance(X, torch.Tensor) \
+#         else torch.tensor(X, dtype=torch.float32).to(DEVICE)
+#     y = y.clone().detach().to(DEVICE) if isinstance(y, torch.Tensor) \
+#         else torch.tensor(y, dtype=torch.long).to(DEVICE)
 
-    dataset = torch.utils.data.TensorDataset(X, y)
-    data_loader = torch.utils.data.DataLoader(dataset, batch_size = batch_size, shuffle = True)
+#     dataset = torch.utils.data.TensorDataset(X, y)
+#     data_loader = torch.utils.data.DataLoader(dataset, batch_size = batch_size, shuffle = True)
     
-    return data_loader
+#     return data_loader
 
 
 
