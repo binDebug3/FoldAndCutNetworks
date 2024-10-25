@@ -12,21 +12,13 @@ from jeffutils.utils import stack_trace
 import matplotlib.pyplot as plt
 
 # ml imports
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from sklearn.utils import shuffle
-
-# random forest
 from sklearn.ensemble import RandomForestClassifier
-# k nearest neighbors
 from sklearn.neighbors import KNeighborsClassifier
-
-# metric imports
 from metric_learn import LMNN
 
 # our model imports
 sys.path.append('../')
-from model import acme
 
 
 
@@ -170,77 +162,22 @@ def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration,
 ### MODEL FUNCTIONS ###
 
 
-def get_model(model_name:str, params:dict=None):
+def get_model(model_name:str):
     """
     Returns a new instance of the model based on the model name.
-    Can be "randomforest", "knn", "acme", or "metric".
-
+    Can be "randomforest", "knn", or "metric".
     Parameters:
         model_name (str): The name of the model to train.
-        params (dict): The hyperparameters to use for the acme model.
-    
     Returns:
         model: The model to train
     """
     mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
-            acme(param=params) if model_name == "acme" else \
             LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else None
     if mdl is None:
-        raise ValueError("Invalid model name. Must be 'randomforest', 'knn', or 'acme'.")
+        raise ValueError(f"Invalid model name. Must be 'randomforest', 'knn' or 'metric' not '{model_name}'.")
     return mdl
 
-
-
-def hyp_tun_acme(X_train:np.ndarray, y_train:np.ndarray, 
-                 X_val:np.ndarray, y_val:np.ndarray,
-                 params:dict=None):
-    """
-    Tune the hyperparameters of the acme model using a grid search
-
-    Parameters:
-        X_train (np.ndarray): training data
-        y_train (np.ndarray): training labels
-        X_val (np.ndarray): validation data
-        y_val (np.ndarray): validation labels
-        params (dict): hyperparameters to tune
-        param_grid (dict): hyperparameters to tune
-
-    Returns:
-        y_pred: predictions on the test set
-        y_pred_train: predictions on the training set
-        dict: best hyperparameters
-        float: average training time
-    """
-    try:
-        regs = [0.1, 1, 10] if params is None else params['reg']
-        dim_regs = [0.01, 0.1, 1] if params is None else params['dim_reg']
-        combos = list(itertools.product(regs, dim_regs))
-    except Exception as e:
-        raise ValueError("Invalid hyperparameters for acme model. Must be a dictionary with 'reg' and 'dim_reg' keys.")
-    
-    # find the best hyperparameters
-    best_params = {'reg': regs[0], 'dim_reg': dim_regs[0]}
-    best_acc = 0
-    best_model = None
-    train_times = []
-    for combo in combos:
-        clf = acme(param={'reg': combo[0], 'dim_reg': combo[1]})
-        start_time = time.perf_counter()
-        clf.fit(X_train, y_train)
-        end_time = time.perf_counter()
-        y_pred = clf.predict(X_val)
-        acc = accuracy_score(y_val, y_pred)
-        train_times.append(end_time - start_time)
-
-        # update best hyperparameters
-        if acc > best_acc:
-            best_acc = acc
-            best_params = params
-            best_model = clf.copy()
-    y_pred = best_model.predict(X_val)
-    y_pred_train = clf.predict(X_train)
-    return y_pred, y_pred_train, best_params, np.mean(train_times)
 
 
 
@@ -303,32 +240,26 @@ def run_standard(model, x_train:np.ndarray, y_train:np.ndarray, x_test:np.ndarra
 
 
 
-def benchmark_ml(model_name:str, experiment_info, datetime, 
-                 params:dict={}, repeat:int=5, 
-                 save_all:bool=True, save_any:bool=True, 
-                 refresh:bool=True, tune_acme:bool=False):
+def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
+                 save_all:bool=True, save_any:bool=True, refresh:bool=True):
     """
     Trains a model on the cancer dataset with different data sizes and saves the accuracy and time data.
-
     Parameters:
-        model_name (str): The name of the model to train. Can be "randomforest", "knn", "acme", or "metric".
+        model_name (str): The name of the model to train. Can be "randomforest", "knn", or "metric".
         experiment_info (tuple): Contains
             dataset_name (str): The name of the dataset to train on.
-            dataset_sizes (list(int)): A list of the sizes of the dataset to train on.
+            data_sizes (list(int)): A list of the sizes of the dataset to train on.
             X_train (np.ndarray): The training data.
             y_train (np.ndarray): The training labels.
             X_test (np.ndarray): The testing data.
             y_test (np.ndarray): The testing labels.
         datetime (str): The current date and time.
-        params (dict): The hyperparameters to use for the acme model.
         repeat (int): The number of times to repeat the experiment.
         save_all (bool): Whether to save all the data or just the means and stds
         save_any (bool): Whether to save any data at all
         refresh (bool): Whether to refresh the last file
-        tune_acme (bool): Whether to tune the hyperparameters of the acme model
-
     Returns:
-    results_dict (dict): A dictionary containing the accuracy and time data for each model and iteration
+        results_dict (dict): A dictionary containing the accuracy and time data for each model and iteration
     """
     if not save_any:
         save_all = False
@@ -350,14 +281,10 @@ def benchmark_ml(model_name:str, experiment_info, datetime,
             if size is None or size > len(X_train):
                 data_sizes[data_sizes.index(size)] = len(X_train)
                 size = len(X_train)
-            # train model
-            if tune_acme:
-                y_pred, y_pred_train, params, train_time = hyp_tun_acme(X_train[:size], y_train[:size], X_test, y_test)
-                tune_acme = False
             elif model_name == "metric":
                 y_pred, y_pred_train, train_time = run_lmnn(X_train[:size], y_train[:size], X_test)
             else:
-                model = get_model(model_name, params)
+                model = get_model(model_name)
                 y_pred, y_pred_train, train_time = run_standard(model, X_train[:size], y_train[:size], X_test)
 
             # Done training, now evaluating accuracy
