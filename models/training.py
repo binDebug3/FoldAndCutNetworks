@@ -129,11 +129,17 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
             loss.backward()
             optimizer.step()
             
-            # Update the loop
+            # Append accuracies and losses
             loss_value = loss.item()
             epoch_loss.append(loss_value)
             epoch_accuracy.append(check_accuracy(y_hat.detach(), y))
-            loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
+            
+            # Update the loop
+            if batch_num<10:
+                disp_batch_num = '0'+str(batch_num)
+            else:
+                disp_batch_num = str(batch_num)
+            loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, disp_batch_num, number_batches, loss_value))
             loop.update()
             batch_num += 1
             
