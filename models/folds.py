@@ -7,6 +7,7 @@ import torch.nn.functional as F # type: ignore
 
 ###################################### Fold Module ######################################
 
+
 class Fold(nn.Module):
     """
     A PyTorch module that performs a folding operation on input tensors along a specified direction.
@@ -75,6 +76,7 @@ class Fold(nn.Module):
 
 
 ###################################### SoftFold Module ######################################
+
 
 class SoftFold(nn.Module):
     """

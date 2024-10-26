@@ -25,7 +25,6 @@ from models.training import *
 
 
 
-
 repeat = 5
 lmnn_default_neighbors = 3
 info_length = 3     # train_acc, test_acc, time
@@ -369,7 +368,6 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
     y_preds = torch.cat(y_preds).cpu().numpy()
             
     return y_preds, y_pred_trains, end_time - start_time
-
 
 
 def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 

@@ -9,6 +9,8 @@ from models.folds import Fold, SoftFold
 
 #################################### Dynamic Origami Model ####################################
 
+
+
 class DynamicOrigami(nn.Module):
     def __init__(self, architecture, num_classes):
         super().__init__()
@@ -67,8 +69,8 @@ class DynamicOrigami(nn.Module):
         # Pass the input through the layers
         for layer in self.layers:
             x = layer(x)
-        return x
 
+        return x
 
 
 
