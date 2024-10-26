@@ -46,13 +46,22 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
     def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1):
         self.warmup_steps = warmup_steps
         self.model_size = model_size
-        super(NoamScheduler, self).__init__(optimizer, last_epoch)
+        self.optimizer = optimizer
+        super(NoamScheduler, self).__init__(self.optimizer, last_epoch)
+        
 
     def get_lr(self):
         step_num = self.last_epoch + 1
         lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
         return [lr for _ in self.base_lrs]
+    
+class LRSchedulerWrapper:
+    def __init__(self, scheduler=None):
+        self.scheduler = scheduler
 
+    def step(self):
+        if self.scheduler is not None:
+            self.scheduler.step()
 
 
 
@@ -94,13 +103,14 @@ def validate(net, val_dataloader, DEVICE):
 
 
 ################################# Training function #################################
-def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE=None):
+def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE=None, lr_schedule = None):
+    learning_rates = []
     # Get the device if it is not already defined
     if DEVICE is None:
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Working Device: {DEVICE}")
     net.to(DEVICE)
-    
+    lr_schedule = LRSchedulerWrapper(lr_schedule)
     # Initialize the lists to keep track of the losses and accuracies
     train_losses = []
     val_losses = []
@@ -129,6 +139,7 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
             loss.backward()
             optimizer.step()
             
+            
             # Update the loop
             loss_value = loss.item()
             epoch_loss.append(loss_value)
@@ -136,6 +147,9 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
             loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
             loop.update()
             batch_num += 1
+        lr_schedule.step()
+        lr = optimizer.param_groups[0]['lr']
+        learning_rates.append(lr)
             
         # Get the average loss for the epoch
         train_losses.append(np.mean(epoch_loss))
@@ -150,4 +164,6 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
     
     # Close the loop and return the losses and accuracies
     loop.close()
+    if lr_schedule.scheduler is not None:
+        return train_losses, val_losses, train_accuracies, val_accuracies, learning_rates
     return train_losses, val_losses, train_accuracies, val_accuracies
