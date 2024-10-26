@@ -80,8 +80,7 @@ def check_accuracy(y_hat:torch.Tensor, y:torch.Tensor) -> float:
     
     # Compare predictions to the true labels and calculate accuracy
     correct = (predictions == y).sum().item()
-    accuracy = correct / y.size(0)
-    return accuracy
+    return correct / y.size(0)
 
 
 def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.device) -> tuple:
@@ -145,35 +144,30 @@ def train(net, optimizer:torch.optim.Optimizer,
         val_accuracies (list) - The validation accuracies for each epoch
     """
     # Get the device if it is not already defined
-    if DEVICE is None:
-        DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if verbose > 2:
-            print(f"Working Device: {DEVICE}")
+    DEVICE = DEVICE or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if verbose > 2:
+        print(f"Working Device: {DEVICE}")
     net.to(DEVICE)
     
     # Initialize the lists to keep track of the losses and accuracies
-    train_losses = []
-    val_losses = []
-    train_accuracies = []
-    val_accuracies = []
-    number_batches = len(train_dataloader)
+    train_losses, val_losses = [], []
+    train_accuracies, val_accuracies = [], []
     val_separation = int(validate_rate * epochs)
+    number_batches = len(train_dataloader)
 
     # Define a loop object to keep track of training and loop through the epochs
     loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
     for i in range(epochs):
-        epoch_loss = []
-        epoch_accuracy = []
+        epoch_loss, correct_preds, total_preds = 0, 0, 0
         net.train()
         
         # Loop through the train_dataloader
-        batch_num = 1
-        for x, y in train_dataloader:
+        for batch_num, (x, y) in enumerate(train_dataloader, 1):
             x, y = x.to(DEVICE), y.to(DEVICE)
             
             # Get the prediction and calculate the loss
             y_hat = net(x)
-            loss = F.cross_entropy(y_hat, y.long())
+            loss = F.cross_entropy(y_hat, y)
 
             # Backpropagate the loss and update the weights
             optimizer.zero_grad()
@@ -182,15 +176,16 @@ def train(net, optimizer:torch.optim.Optimizer,
             
             # Update the loop
             loss_value = loss.item()
-            epoch_loss.append(loss_value)
-            epoch_accuracy.append(check_accuracy(y_hat.detach(), y))
-            loop.set_description('Epoch:{}/{}, Batch: {}/{}, Loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
+            epoch_loss += loss_value
+            correct_preds += (y_hat.argmax(dim=1) == y).sum().item()
+            total_preds += y.size(0)
+            if verbose > 1:
+                loop.set_description('Epoch:{}/{}, Batch: {}/{}, Loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
             loop.update()
-            batch_num += 1
             
         # Get the average loss for the epoch
-        train_losses.append(np.mean(epoch_loss))
-        train_accuracies.append(np.mean(epoch_accuracy))
+        train_losses.append(epoch_loss / number_batches)
+        train_accuracies.append(correct_preds / total_preds)
         
         # Calculate the validation loss and accuracy
         if val_separation > 0 and i % val_separation == 0:
@@ -200,8 +195,4 @@ def train(net, optimizer:torch.optim.Optimizer,
     
     # Close the loop and return the losses and accuracies
     loop.close()
-    if val_separation == 0:
-        val_losses, val_accuracies = validate(net, val_dataloader, DEVICE)
-        val_losses = [val_losses]
-        val_accuracies = [val_accuracies]
     return train_losses, val_losses, train_accuracies, val_accuracies

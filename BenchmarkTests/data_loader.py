@@ -26,7 +26,7 @@ import cnn_bench
 all_benchmark_models = ["randomforest", "knn", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "metric"]
 benchmark_models = all_benchmark_models[2:4]
 all_benchmark_datasets = ["digits", "fashionMNIST", "cancer", "cifar10", "imagenet"]
-benchmark_datasets = all_benchmark_datasets[:-1]
+benchmark_datasets = all_benchmark_datasets[:1]
 default_ratio_list = [0.1, 0.2]
 
 
