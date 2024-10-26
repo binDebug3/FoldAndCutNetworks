@@ -32,7 +32,7 @@ repeat = 5
 lmnn_default_neighbors = 3
 info_length = 3     # train_acc, test_acc, time
 date_format = "%y%m%d@%H%M"
-possible_models = ["randomforest", "knn", "cnn", "ours", "metric"]
+possible_models = ["randomforest", "knn", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "metric"]
 
 
 
@@ -161,6 +161,97 @@ def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration,
     path = f"results/{dataset_name}/{model_name}/npy_files/{partial_name}_d{datetime}.npy"
     np.save(path, data)
     return None
+
+
+def delete_data(dataset_name:list=None, model_name:list=None, 
+                after:dt.datetime=None, before:dt.datetime=None,
+                safety_sleep:int=10, verbose:int=2) -> None:
+    """
+    Delete locally saved data from the numpy files
+    Parameters:
+        dataset_name (list): list of dataset names to clear
+        model_name (list): list of model names to clear
+        after (dt.datetime): clear data after this date
+        before (dt.datetime): clear data before this date
+        verbose (int): verbosity level
+    """
+    # input validation
+    assert dataset_name is None or \
+            type(dataset_name) == str or \
+            (type(dataset_name) == list and all([type(name) == str for name in dataset_name])), \
+            f"'dataset_name' must be a string or a list of strings not {type(dataset_name)}"
+    assert model_name is None or \
+            type(model_name) == str or \
+            (type(model_name) == list and all([type(name) == str for name in model_name])), \
+            f"'model_name' must be a string or a list of strings not {type(model_name)}"
+    assert before is None or \
+            type(before) == dt.datetime, \
+            f"'before' must be a datetime object not {type(before)}"
+    assert after is None or \
+            type(after) == dt.datetime, \
+            f"'after' must be a datetime object not {type(after)}"
+    if after is not None and before is not None:
+        assert after < before, f"'after' ({after}) must be before 'before' ({before})"
+    assert type(safety_sleep) == int, f"'safety_sleep' must be an integer not {safety_sleep}"
+    assert safety_sleep > 2, f"'safety_sleep' must be an integer over 2 not {safety_sleep}"
+    
+    if dataset_name is None:
+        print("Warning! Deleting all data for all datasets")
+        time.sleep(1)
+    if model_name is None:
+        print("Warning! Deleting all data for all models")
+        time.sleep(1)
+    if after is None and before is None:
+        print("Warning! Deleting data for all dates")
+        time.sleep(1)
+    
+    dataset_names = [dataset_name] if type(dataset_name) == str else dataset_name
+    model_names = [model_name] if type(model_name) == str else model_name
+    dataset_names = dataset_names if dataset_names is not None else os.listdir("results")
+    model_names = model_names if model_names is not None else possible_models
+    
+    print("Deleting data...")
+    for i in range(safety_sleep):
+        print(f"{safety_sleep-i}", end="\r")
+        time.sleep(1)
+    if verbose > 0:
+        print(f"From datasets: \t{dataset_names}")
+        print(f"From models: \t{model_names}")
+        after_print = after if after is not None else "beginning of time"
+        before_print = before if before is not None else "end of time"
+        print(f"Created between: {after_print} and {before_print}")
+        print()
+    for i in range(safety_sleep):
+        print(f"{safety_sleep-i}", end="\r")
+        time.sleep(1)
+    
+    count = 0
+    for dname in dataset_names:
+        for mname in model_names:
+            dir = build_dir(dname, mname)
+            if not os.path.exists(dir):
+                if verbose > 2:
+                    print(f"Skipping '{dir}' because does not exist.")
+                continue
+            for file in os.listdir(dir):
+                if ".npy" in file:
+                    date = dt.datetime.strptime(file.split("_")[-1].split(".")[0][1:], date_format)
+                    if (after is None or date >= after) and (before is None or date <= before):
+                        os.remove(os.path.join(dir, file))
+                        count += 1
+                        if verbose > 0:
+                            print("\tDeleted\t", file, end=" ")
+                            if verbose > 1:
+                                print("\tfrom", dir)
+                            else:
+                                print()
+    print("Data deletion complete")
+    if verbose > 0:
+        print(f"Deleted {count} files from {len(dataset_names)} datasets and {len(model_names)} models")
+        
+            
+            
+            
 
 
 
@@ -468,7 +559,7 @@ def plot_results(benchmarking, constants, scale=5,
                 plt.yscale('log')
             plt.title(info_type)
             plt.legend()
-    plt.suptitle("Model Benchmarking")
+    plt.suptitle(f"Model Benchmarking on '{dataset_name}'")
     plt.tight_layout()
 
     # save and show the figure

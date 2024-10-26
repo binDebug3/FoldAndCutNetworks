@@ -35,12 +35,13 @@ class Fold(nn.Module):
         self.n = nn.Parameter(n)
             
         # Initialize stretch as a parameter if needed
+        no_stretch = torch.tensor(2.0)
         if self.has_stretch:
-            self.stretch = nn.Parameter(torch.tensor(2.0))
+            self.stretch = nn.Parameter(no_stretch)
         else:
-            self.register_buffer('stretch', torch.tensor(2.0))
-
-            
+            self.register_buffer('stretch', no_stretch)
+    
+    
     def forward(self, input:torch.Tensor) -> torch.Tensor:
         """
         This function performs the folding operation on the input tensor.
@@ -115,16 +116,12 @@ class SoftFold(nn.Module):
         self.n = nn.Parameter(n)
 
         # Initialize crease parameter
-        if crease is None:
-            self.crease = nn.Parameter(self.crease_dist())
-        else:
-            self.register_buffer('crease', torch.tensor(crease))
+        self.crease = nn.Parameter(self.crease_dist()) if crease is None else \
+                        self.register_buffer('crease', torch.tensor(crease))
             
         # Initialize stretch as a parameter if needed
-        if self.has_stretch:
-            self.stretch = nn.Parameter(torch.tensor(2.0))
-        else:
-            self.register_buffer('stretch', torch.tensor(2.0))
+        self.stretch = nn.Parameter(torch.tensor(2.0)) if self.has_stretch else \
+                        self.register_buffer('stretch', torch.tensor(2.0))
 
             
     def crease_dist(self, n_samples=1, std=0.5):
@@ -144,23 +141,23 @@ class SoftFold(nn.Module):
         return torch.where(mode_selector == 0, left_mode, right_mode)
     
 
-    def forward(self, input:torch.Tensor) -> torch.Tensor:
+    def forward(self, input_tensor:torch.Tensor) -> torch.Tensor:
         """
         This function performs the soft folding operation on the input tensor.
         Parameters:
-            input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
+            input_tensor (torch.Tensor): The input tensor of shape (batch_size, input_dim).
         Returns:
             output (torch.Tensor): The transformed tensor after the soft folding operation.
         """
         # pad the input if the width is greater than the input width, raise error if input width is greater than fold width
-        if self.width > input.shape[1]:
-            input = F.pad(input, (0, self.width - input.shape[1]))
-        elif self.width < input.shape[1]:
-            raise ValueError(f"Input dimension ({input.shape[1]}) is greater than fold width ({self.width})")
+        if self.width > input_tensor.shape[1]:
+            input_tensor = F.pad(input_tensor, (0, self.width - input_tensor.shape[1]))
+        elif self.width < input_tensor.shape[1]:
+            raise ValueError(f"Input dimension ({input_tensor.shape[1]}) is greater than fold width ({self.width})")
 
         # Compute z_dot_x, n_dot_n, and get scales
         eps = 1e-8  
-        z_dot_x = input @ self.n            # shape: (batch_size,)
+        z_dot_x = input_tensor @ self.n     # shape: (batch_size,)
         n_dot_n = self.n @ self.n + eps     # shape: (1,)
         scales = z_dot_x / n_dot_n          # shape: (batch_size,)
 
@@ -170,6 +167,5 @@ class SoftFold(nn.Module):
         sigmoid = torch.sigmoid(p)          # shape: (batch_size,)
 
         # Get the orthogonal projection of the input onto the normal vector and compute the output
-        ortho_proj = (1 - scales).unsqueeze(1) * self.n                     # shape: (batch_size, width)
-        output = input + self.stretch * sigmoid.unsqueeze(1) * ortho_proj   # shape: (batch_size, width)
-        return output
+        ortho_proj = (1 - scales).unsqueeze(1) * self.n                          # shape: (batch_size, width)
+        return input_tensor + self.stretch * sigmoid.unsqueeze(1) * ortho_proj   # shape: (batch_size, width)
