@@ -15,7 +15,10 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from metric_learn import LMNN
+#from metric_learn import LMNN
+
+#deep learning imports
+from cnn_bench import CNNModel
 
 # our model imports
 sys.path.append('../')
@@ -270,9 +273,11 @@ def get_model(model_name:str, input_size:int=0) -> object:
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
             LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else \
             OrigamiFold4(input_size) if model_name == "dl_fold" else \
-            OrigamiSoft4(input_size) if model_name == "dl_softfold" else None
+            OrigamiSoft4(input_size) if model_name == "dl_softfold" else \
+            CNNModel(input_channels= input_size) if model_name == "dl_cnn" else None
+            
     if mdl is None:
-        raise InvalidModelError(f"Invalid model name. Must be 'randomforest', 'knn', 'dl_fold', 'dl_softfold' or 'metric' not '{model_name}'.")
+        raise InvalidModelError(f"Invalid model name. Must be 'randomforest', 'knn', 'dl_cnn', 'dl_fold', 'dl_softfold' or 'metric' not '{model_name}'.")
     return mdl
 
 
