@@ -1,6 +1,6 @@
 # Origami Network
 
-Origami Network is a novel neural network architecture designed to transform high-dimensional data with efficient learning and reduced computational complexity. Inspired by principles of geometric folding, this model employs a custom **fold layer** to reshape data through learned hyperplanes, allowing for non-linear transformations that improve training speed and convergence.
+Origami Network is a novel neural network architecture designed to transform high-dimensional data with efficient learning and reduced complexity. Inspired by principles of geometric folding, this model employs a custom **fold layer** to reshape data through learned hyperplanes, allowing for non-linear transformations that improve prediction speed and convergence.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -12,12 +12,13 @@ Origami Network is a novel neural network architecture designed to transform hig
 - [Research & Development](#research--development)
 - [Contributing](#contributing)
 - [License](#license)
+- [Workflow](#workflow)
 
 ## Overview
 
 The Origami Network architecture introduces a data transformation process similar to folding in origami, where input data is sequentially mapped across high-dimensional hyperplanes. This process enables:
-- A reduced need for multiple layers in standard architectures.
-- Accelerated learning through **hyperplane-based data folding**.
+- A reduced need for large, high-parameter layers in standard architectures.
+- Accelerated prediction through **hyperplane-based data folding**.
 - Simplified optimization, using fewer trainable parameters to capture complex data patterns.
 
 ## Features
@@ -49,9 +50,10 @@ from models.training import *
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 train_loader = load_data(x_train, y_train)
 val_loader = load_data(x_test, y_test)
+model = OrigamiFold4(x_train.shape[1])
 train(model, optimizer, train_loader, val_loader, epochs=200, verbose=1)
 ```
-Refer to the ipynb files titled 'd-<name>.ipynb' for more usage and training examples.
+Refer to the ipynb files titled 'd-name.ipynb' for more usage and training examples.
 
 ## Research and Development
 The Origami Network architecture is under active research, focusing on:
@@ -72,11 +74,13 @@ Sam Layton
 [![Email][email-icon]][email-url2]
 
 Dallin Stewart - dallinpstewart@gmail.com
+
 [![LinkedIn][linkedin-icon]][linkedin-url1]
 [![GitHub][github-icon]][github-url1]
 [![Email][email-icon]][email-url1]
 
 Jeddy Bennett
+
 [![LinkedIn][linkedin-icon]][linkedin-url3]
 [![GitHub][github-icon]][github-url3]
 [![Email][email-icon]][email-url3]
