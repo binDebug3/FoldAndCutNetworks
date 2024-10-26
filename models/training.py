@@ -111,7 +111,7 @@ def train(net, optimizer:torch.optim.Optimizer,
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
-          validate_rate:float=0, verbose:int=0):
+          validate_rate:float=0, verbose:int=0, lr_schedule:LRSchedulerWrapper=None):
     """
     This function trains the neural network.
     Parameters:
@@ -144,6 +144,7 @@ def train(net, optimizer:torch.optim.Optimizer,
     learning_rates = []
     number_batches = len(train_dataloader)
     val_separation = int(validate_rate * epochs)
+    lr_scheduler = lr_schedule
 
     # Define a loop object to keep track of training and loop through the epochs
     loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
@@ -179,16 +180,17 @@ def train(net, optimizer:torch.optim.Optimizer,
             loop.set_description('Epoch:{}/{}, Batch: {}/{}, Loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
             loop.update()
             batch_num += 1
-      lr_schedule.step()
-      lr = optimizer.param_groups[0]['lr']
-      learning_rates.append(lr)
+        
+        lr_scheduler.step()
+        lr = optimizer.param_groups[0]['lr']
+        learning_rates.append(lr)
             
         # Get the average loss for the epoch
         train_losses.append(np.mean(epoch_loss))
         train_accuracies.append(np.mean(epoch_accuracy))
         
         # Calculate the validation loss and accuracy
-        if val_separation > 0 and i % val_separation == 0:
+        if val_separation > 0 and (i+1)% val_separation == 0:
             val_loss, val_accuracy = validate(net, val_dataloader, DEVICE)
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
@@ -200,6 +202,6 @@ def train(net, optimizer:torch.optim.Optimizer,
         val_losses = [val_losses]
         val_accuracies = [val_accuracies]
         
-    if lr_schedule.scheduler is not None:
+    if lr_scheduler is not None:
         return train_losses, val_losses, train_accuracies, val_accuracies, learning_rates
     return train_losses, val_losses, train_accuracies, val_accuracies
