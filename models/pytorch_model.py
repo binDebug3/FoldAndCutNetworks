@@ -40,7 +40,7 @@ class Fold(nn.Module):
         else:
             self.register_buffer('stretch', torch.tensor(2.0))
             
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, impact:bool=False) -> torch.Tensor:
         """
         Args:
             input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
@@ -67,6 +67,8 @@ class Fold(nn.Module):
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
         folded = input + self.stretch * indicator.unsqueeze(1) * (self.n - projection)
+        if impact:
+            return folded, indicator.sum() / indicator.numel()
         return folded
        
 
@@ -126,7 +128,7 @@ class SigmoidFold(nn.Module):
         return torch.where(mode_selector == 0, left_mode, right_mode)
     
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, impact:bool=False) -> torch.Tensor:
         """
         Args:
             input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
@@ -156,6 +158,9 @@ class SigmoidFold(nn.Module):
         # Get the orthogonal projection of the input onto the normal vector and compute the output
         ortho_proj = (1 - scales).unsqueeze(1) * self.n  # shape: (batch_size, width)
         output = input + self.stretch * sigmoid.unsqueeze(1) * ortho_proj  # shape: (batch_size, width)
+        if impact:
+            # count the number of values that are folded
+            return output, (sigmoid > 0.5).float() / sigmoid.numel()
         return output
 
 
@@ -278,8 +283,14 @@ class OrigamiNetwork(nn.Module):
                 self.optimizer = optim.Adam(self.parameters(), lr = self.learning_rate, weight_decay = self.regularization)
             else:
                 self.optimizer = optim.Adam(self.parameters(), lr = self.learning_rate)
+        elif self.optimizer_type == "adamw":
+            self.optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
+        elif self.optimizer_type == "nadam":
+            self.optimizer = optim.NAdam(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
+        elif self.optimizer_type == "rmsprop":
+            self.optimizer = optim.RMSprop(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
         else:
-            raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
+            raise ValueError("Optimizer must be 'sgd', 'grad', 'adam', 'adamw', 'nadam', or 'rmsprop'")
         
         if self.lr_schedule:
             self.schedule = NoamScheduler(self.optimizer, 200, self.width)
