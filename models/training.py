@@ -1,54 +1,61 @@
-import torch # type: ignore
-import torch.nn as nn # type: ignore
-import torch.optim as optim # type: ignore
+import torch                    # type: ignore
+import torch.nn as nn           # type: ignore
+import torch.optim as optim     # type: ignore
 import torch.nn.functional as F # type: ignore
-import numpy as np # type: ignore
-from tqdm import tqdm # type: ignore
+import numpy as np              # type: ignore
+from tqdm import tqdm           # type: ignore
 from torch.utils.data import TensorDataset, DataLoader # type: ignore
 
 
 
 
-################################# Data Prep #####################################        
+################################# Data Prep #####################################   
+     
 def load_data(x_data, y_data, batch_size=32, shuffle=True) -> torch.utils.data.DataLoader:
+    """
+    This function loads the data into a DataLoader object.
+    Parameters:
+        x_data (np.ndarray) - The input data
+        y_data (np.ndarray) - The labels
+        batch_size (int) - The batch size
+        shuffle (bool) - Whether to
+    Returns:
+        DataLoader - The DataLoader object
+    """
     # Convert x and y data to PyTorch tensors if they aren’t already
-    x_tensor = torch.tensor(x_data, dtype=torch.float32)  # Specify float32 for model compatibility
-    y_tensor = torch.tensor(y_data, dtype=torch.long)     # Specify long for classification labels
+    x_tensor = torch.tensor(x_data, dtype=torch.float32)
+    y_tensor = torch.tensor(y_data, dtype=torch.long)
 
-    # Create a TensorDataset
     dataset = TensorDataset(x_tensor, y_tensor)
-    
-    # Create the DataLoader
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-    return dataloader
-
-# TODO: Fix the following function to robustly handle different types of label data
-# def encode_y(y, DEVICE) -> torch.Tensor:
-#         """
-#         Encodes the labels into one-hot format.
-#         Parameters:
-#             y (np.ndarray) - The labels
-#         """
-#         # if type(y) == np.ndarray:
-#         #     y = torch.tensor(y)
-#         y = y.clone().detach().to(DEVICE, dtype=torch.long) if isinstance(y, torch.Tensor) \
-#             else torch.tensor(y, dtype=torch.long).to(DEVICE)
-#         classes = torch.unique(y)
-#         num_classes = len(classes)
-#         one_hot = F.one_hot(y, num_classes).float()
-#         return one_hot
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 
 
 
 ################################# Learning Rate Scheduling #################################
+
 class NoamScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1):
+    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1) -> None:
+        """
+        This class implements the Noam learning rate scheduler which is a learning rate scheduler that 
+        increases the learning rate linearly for the first warmup_steps and then 
+        decreases it proportionally to the inverse square root of the step number.
+        Parameters:
+            optimizer (torch.optim.Optimizer) - The optimizer
+            warmup_steps (int) - The number of warmup steps
+            model_size (int) - The model size
+            last_epoch (int) - The last epoch number (default: -1)
+        """
         self.warmup_steps = warmup_steps
         self.model_size = model_size
         super(NoamScheduler, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
+    def get_lr(self) -> list:
+        """
+        This function calculates the learning rate based on the Noam learning rate scheduler.
+        Returns:
+            list - The learning rate for each parameter group
+        """
         step_num = self.last_epoch + 1
         lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
         return [lr for _ in self.base_lrs]
@@ -56,8 +63,18 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
 
 
 
+
 ################################# Helper functions for training #################################
-def check_accuracy(y_hat, y):
+
+def check_accuracy(y_hat:torch.Tensor, y:torch.Tensor) -> float:
+    """
+    This function checks the accuracy of the model.
+    Parameters:
+        y_hat (torch.Tensor) - The predicted values
+        y (torch.Tensor) - The true values
+    Returns:
+        accuracy (float) - The accuracy of the model
+    """
     # Get the predicted class by finding the max logit (highest score) along the last dimension
     predictions = y_hat.argmax(dim=1)
     
@@ -67,7 +84,17 @@ def check_accuracy(y_hat, y):
     return accuracy
 
 
-def validate(net, val_dataloader, DEVICE):
+def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.device) -> tuple:
+    """
+    This function calculates the validation loss and accuracy.
+    Parameters:
+        net (nn.Module) - The neural network
+        val_dataloader (DataLoader) - The DataLoader object for the validation set
+        DEVICE (torch.device) - The device to run the calculations on
+    Returns:
+        avg_val_loss (float) - The average validation loss
+        avg_val_accuracy (float) - The average validation accuracy
+    """
     net.eval()
     val_loss = []
     val_accuracy = []
@@ -94,11 +121,34 @@ def validate(net, val_dataloader, DEVICE):
 
 
 ################################# Training function #################################
-def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE=None):
+
+def train(net, optimizer:torch.optim.Optimizer, 
+          train_dataloader:torch.utils.data.DataLoader, 
+          val_dataloader:torch.utils.data.DataLoader, 
+          epochs:int=100, DEVICE:torch.device=None, 
+          validate_rate:float=0, verbose:int=0):
+    """
+    This function trains the neural network.
+    Parameters:
+        net (nn.Module) - The neural network
+        optimizer (torch.optim.Optimizer) - The optimizer
+        train_dataloader (DataLoader) - The DataLoader object for the training set
+        val_dataloader (DataLoader) - The DataLoader object for the validation set
+        epochs (int) - The number of epochs to train the model (default: 100)
+        DEVICE (torch.device) - The device to run the calculations on
+        validate_rate (float) - The rate at which to validate the model (default: 0)
+        verbose (int) - The verbosity level (default: 0)
+    Returns:
+        train_losses (list) - The training losses for each epoch
+        val_losses (list) - The validation losses for each epoch
+        train_accuracies (list) - The training accuracies for each epoch
+        val_accuracies (list) - The validation accuracies for each epoch
+    """
     # Get the device if it is not already defined
     if DEVICE is None:
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Working Device: {DEVICE}")
+        if verbose > 2:
+            print(f"Working Device: {DEVICE}")
     net.to(DEVICE)
     
     # Initialize the lists to keep track of the losses and accuracies
@@ -107,9 +157,10 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
     train_accuracies = []
     val_accuracies = []
     number_batches = len(train_dataloader)
+    val_separation = int(validate_rate * epochs)
 
-    #define a loop object to keep track of training and loop through the epochs
-    loop = tqdm(total=epochs*number_batches, position=0)
+    # Define a loop object to keep track of training and loop through the epochs
+    loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
     for i in range(epochs):
         epoch_loss = []
         epoch_accuracy = []
@@ -133,7 +184,7 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
             loss_value = loss.item()
             epoch_loss.append(loss_value)
             epoch_accuracy.append(check_accuracy(y_hat.detach(), y))
-            loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
+            loop.set_description('Epoch:{}/{}, Batch: {}/{}, Loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
             loop.update()
             batch_num += 1
             
@@ -142,12 +193,15 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
         train_accuracies.append(np.mean(epoch_accuracy))
         
         # Calculate the validation loss and accuracy
-        val_loss, val_accuracy = validate(net, val_dataloader, DEVICE)
-        
-        # Append the validation loss and accuracy
-        val_losses.append(val_loss)
-        val_accuracies.append(val_accuracy)
+        if val_separation > 0 and i % val_separation == 0:
+            val_loss, val_accuracy = validate(net, val_dataloader, DEVICE)
+            val_losses.append(val_loss)
+            val_accuracies.append(val_accuracy)
     
     # Close the loop and return the losses and accuracies
     loop.close()
+    if val_separation == 0:
+        val_losses, val_accuracies = validate(net, val_dataloader, DEVICE)
+        val_losses = [val_losses]
+        val_accuracies = [val_accuracies]
     return train_losses, val_losses, train_accuracies, val_accuracies

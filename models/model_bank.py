@@ -1,13 +1,14 @@
-import torch # type: ignore
-import torch.nn as nn # type: ignore
-import torch.nn.functional as F # type: ignore
-import numpy as np # type: ignore
+import torch                        # type: ignore
+import torch.nn as nn               # type: ignore
+import torch.nn.functional as F     # type: ignore
+import numpy as np                  # type: ignore
 from models.folds import Fold, SoftFold
 
 
 
 
 #################################### Dynamic Origami Model ####################################
+
 class DynamicOrigami(nn.Module):
     def __init__(self, architecture, num_classes):
         super().__init__()
@@ -51,7 +52,14 @@ class DynamicOrigami(nn.Module):
             raise e
         
         
-    def forward(self, x):
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        """
+        This function defines the forward pass of the model
+        Parameters:
+            x: (torch.Tensor) - The input tensor to the model
+        Returns:
+            x: (torch.Tensor) - The output tensor from the model
+        """
         # flatten the input if it is not already
         if x.dim() > 2:
             x = x.view(x.shape[0], -1)
@@ -59,24 +67,52 @@ class DynamicOrigami(nn.Module):
         # Pass the input through the layers
         for layer in self.layers:
             x = layer(x)
-        
-        # Return the final output
         return x
 
 
 
 
-#################################### Simple Origami Net Example ####################################
-class OrigamiNetExample(nn.Module):
+#################################### Testing Networks ####################################
+
+class OrigamiControl0(nn.Module):
     def __init__(self):
         super().__init__()
-        self.f1 = Fold(784, 0.1)
-        self.f2 = Fold(800, 0.1, fold_in=False)
-        self.f3 = Fold(1000, 0.1)
-        self.f4 = Fold(1000, 0.1, fold_in=False)
-        self.cut = nn.Linear(1000, 10)
+        self.cut = nn.Linear(784, 10)
+    
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        """
+        This function defines the forward pass of the model
+        Parameters:
+            x: (torch.Tensor) - The input tensor to the model
+        Returns:
+            x: (torch.Tensor) - The output tensor from the model
+        """
+        # flatten the input if it is not already
+        if x.dim() > 2:
+            x = x.view(x.shape[0], -1)
+            
+        # Pass the input through the layers
+        x = self.cut(x)
+        return x
+
+
+class OrigamiFold4(nn.Module):
+    def __init__(self, input_size:int):
+        super().__init__()
+        self.f1 = Fold(input_size, 0.1)
+        self.f2 = Fold(int(input_size*1.05), 0.1, fold_in=False)
+        self.f3 = Fold(int(input_size*1.1), 0.1)
+        self.f4 = Fold(int(input_size*1.1), 0.1, fold_in=False)
+        self.cut = nn.Linear(int(input_size*1.1), 10)
         
-    def forward(self, x):
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        """
+        This function defines the forward pass of the model
+        Parameters:
+            x: (torch.Tensor) - The input tensor to the model
+        Returns:
+            x: (torch.Tensor) - The output tensor from the model
+        """
         # flatten the input if it is not already
         if x.dim() > 2:
             x = x.view(x.shape[0], -1)
@@ -87,6 +123,34 @@ class OrigamiNetExample(nn.Module):
         x = self.f3(x)
         x = self.f4(x)
         x = self.cut(x)
+        return x
+
+
+class OrigamiSoft4(nn.Module):
+    def __init__(self, input_size:int):
+        super().__init__()
+        self.f1 = SoftFold(input_size, has_stretch=True)
+        self.f2 = SoftFold(int(input_size*1.05), has_stretch=True)
+        self.f3 = SoftFold(int(input_size*1.1), has_stretch=True)
+        self.f4 = SoftFold(int(input_size*1.1), has_stretch=True)
+        self.cut = nn.Linear(int(input_size*1.1), 10)
         
-        # Return the final output
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        """
+        This function defines the forward pass of the model
+        Parameters:
+            x: (torch.Tensor) - The input tensor to the model
+        Returns:
+            x: (torch.Tensor) - The output tensor from the model
+        """
+        # flatten the input if it is not already
+        if x.dim() > 2:
+            x = x.view(x.shape[0], -1)
+            
+        # Pass the input through the layers
+        x = self.f1(x)
+        x = self.f2(x)
+        x = self.f3(x)
+        x = self.f4(x)
+        x = self.cut(x)
         return x
