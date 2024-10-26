@@ -189,7 +189,7 @@ def train(model, optimizer:torch.optim.Optimizer,
         
         # Calculate the validation loss and accuracy
         if val_separation > 0 and (i+1)% val_separation == 0:
-            val_loss, val_accuracy = validate(net, val_dataloader, DEVICE)
+            val_loss, val_accuracy = validate(model, val_dataloader, DEVICE)
 
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
