@@ -37,8 +37,12 @@ class NoamScheduler(optim.lr_scheduler._LRScheduler):
         self.optimizer = optimizer
         super(NoamScheduler, self).__init__(self.optimizer, last_epoch)
         
-
-    def get_lr(self):
+    def get_lr(self) -> list:
+        """
+        This function calculates the learning rate based on the current step number.
+        Returns:
+            list - The learning rate for each parameter group
+        """
         step_num = self.last_epoch + 1
         lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
         return [lr for _ in self.base_lrs]
@@ -50,6 +54,8 @@ class LRSchedulerWrapper:
     def step(self):
         if self.scheduler is not None:
             self.scheduler.step()
+
+
 
 ################################# Helper functions for training #################################
 
@@ -108,7 +114,7 @@ def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.devic
 
 
 ################################# Training function #################################
-def train(net, optimizer:torch.optim.Optimizer, 
+def train(model, optimizer:torch.optim.Optimizer, 
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
@@ -134,15 +140,11 @@ def train(net, optimizer:torch.optim.Optimizer,
     DEVICE = DEVICE or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if verbose > 2:
         print(f"Working Device: {DEVICE}")
-    net.to(DEVICE)
+    model.to(DEVICE)
     
     # Initialize the lists to keep track of the losses and accuracies
     train_losses, val_losses = [], []
     train_accuracies, val_accuracies = [], []
-    train_losses = []
-    val_losses = []
-    train_accuracies = []
-    val_accuracies = []
     learning_rates = []
     number_batches = len(train_dataloader)
     val_separation = int(validate_rate * epochs)
@@ -153,14 +155,14 @@ def train(net, optimizer:torch.optim.Optimizer,
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
-        net.train()
+        model.train()
         
         # Loop through the train_dataloader
         for batch_num, (x, y) in enumerate(train_dataloader, 1):
             x, y = x.to(DEVICE), y.to(DEVICE)
             
             # Get the prediction and calculate the loss
-            y_hat = net(x)
+            y_hat = model(x)
             loss = F.cross_entropy(y_hat, y)
 
             # Backpropagate the loss and update the weights
@@ -177,14 +179,17 @@ def train(net, optimizer:torch.optim.Optimizer,
                 loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
                 loop.update()
        
-            
+        lr_schedule.step()
+        lr = optimizer.param_groups[0]['lr']
+        learning_rates.append(lr)
+        
         # Get the average loss for the epoch
         train_losses.append(epoch_loss / number_batches)
         train_accuracies.append(correct_preds / total_preds)
         
         # Calculate the validation loss and accuracy
         if val_separation > 0 and i % val_separation == 0:
-            val_loss, val_accuracy = validate(net, val_dataloader, DEVICE)
+            val_loss, val_accuracy = validate(model, val_dataloader, DEVICE)
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
     
