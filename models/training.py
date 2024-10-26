@@ -4,7 +4,7 @@ import torch.optim as optim     # type: ignore
 import torch.nn.functional as F # type: ignore
 import numpy as np              # type: ignore
 from tqdm import tqdm           # type: ignore
-from torch.utils.data import TensorDataset, DataLoader # type: ignore
+from torch.utils.data import TensorDataset, DataLoader # type: ignore   
 
 
 
@@ -29,40 +29,27 @@ def load_data(x_data, y_data, batch_size=32, shuffle=True) -> torch.utils.data.D
     dataset = TensorDataset(x_tensor, y_tensor)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-
-
-
 ################################# Learning Rate Scheduling #################################
-
 class NoamScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1) -> None:
-        """
-        This class implements the Noam learning rate scheduler which is a learning rate scheduler that 
-        increases the learning rate linearly for the first warmup_steps and then 
-        decreases it proportionally to the inverse square root of the step number.
-        Parameters:
-            optimizer (torch.optim.Optimizer) - The optimizer
-            warmup_steps (int) - The number of warmup steps
-            model_size (int) - The model size
-            last_epoch (int) - The last epoch number (default: -1)
-        """
+    def __init__(self, optimizer, warmup_steps, model_size, last_epoch=-1):
         self.warmup_steps = warmup_steps
         self.model_size = model_size
-        super(NoamScheduler, self).__init__(optimizer, last_epoch)
+        self.optimizer = optimizer
+        super(NoamScheduler, self).__init__(self.optimizer, last_epoch)
+        
 
-    def get_lr(self) -> list:
-        """
-        This function calculates the learning rate based on the Noam learning rate scheduler.
-        Returns:
-            list - The learning rate for each parameter group
-        """
+    def get_lr(self):
         step_num = self.last_epoch + 1
         lr = self.optimizer.defaults['lr'] * (self.model_size ** (-0.5)) * min(step_num ** (-0.5), step_num * self.warmup_steps ** (-1.5))
         return [lr for _ in self.base_lrs]
+    
+class LRSchedulerWrapper:
+    def __init__(self, scheduler=None):
+        self.scheduler = scheduler
 
-
-
-
+    def step(self):
+        if self.scheduler is not None:
+            self.scheduler.step()
 
 ################################# Helper functions for training #################################
 
@@ -82,7 +69,6 @@ def check_accuracy(y_hat:torch.Tensor, y:torch.Tensor) -> float:
     correct = (predictions == y).sum().item()
     accuracy = correct / y.size(0)
     return accuracy
-
 
 def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.device) -> tuple:
     """
@@ -121,7 +107,6 @@ def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.devic
 
 
 ################################# Training function #################################
-
 def train(net, optimizer:torch.optim.Optimizer, 
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
@@ -156,11 +141,13 @@ def train(net, optimizer:torch.optim.Optimizer,
     val_losses = []
     train_accuracies = []
     val_accuracies = []
+    learning_rates = []
     number_batches = len(train_dataloader)
     val_separation = int(validate_rate * epochs)
 
     # Define a loop object to keep track of training and loop through the epochs
     loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
+
     for i in range(epochs):
         epoch_loss = []
         epoch_accuracy = []
@@ -184,9 +171,17 @@ def train(net, optimizer:torch.optim.Optimizer,
             loss_value = loss.item()
             epoch_loss.append(loss_value)
             epoch_accuracy.append(check_accuracy(y_hat.detach(), y))
+
+            loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
+            loop.update()
+            batch_num += 1
+       
             loop.set_description('Epoch:{}/{}, Batch: {}/{}, Loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
             loop.update()
             batch_num += 1
+      lr_schedule.step()
+      lr = optimizer.param_groups[0]['lr']
+      learning_rates.append(lr)
             
         # Get the average loss for the epoch
         train_losses.append(np.mean(epoch_loss))
@@ -204,4 +199,7 @@ def train(net, optimizer:torch.optim.Optimizer,
         val_losses, val_accuracies = validate(net, val_dataloader, DEVICE)
         val_losses = [val_losses]
         val_accuracies = [val_accuracies]
+        
+    if lr_schedule.scheduler is not None:
+        return train_losses, val_losses, train_accuracies, val_accuracies, learning_rates
     return train_losses, val_losses, train_accuracies, val_accuracies

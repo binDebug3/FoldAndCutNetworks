@@ -7,6 +7,7 @@ import torch.nn.functional as F # type: ignore
 
 ###################################### Fold Module ######################################
 
+
 class Fold(nn.Module):
     """
     A PyTorch module that performs a folding operation on input tensors along a specified direction.
@@ -38,8 +39,8 @@ class Fold(nn.Module):
             self.stretch = nn.Parameter(torch.tensor(2.0))
         else:
             self.register_buffer('stretch', torch.tensor(2.0))
-    
-    
+
+            
     def forward(self, input:torch.Tensor) -> torch.Tensor:
         """
         This function performs the folding operation on the input tensor.
@@ -74,6 +75,7 @@ class Fold(nn.Module):
 
 
 ###################################### SoftFold Module ######################################
+
 
 class SoftFold(nn.Module):
     """
