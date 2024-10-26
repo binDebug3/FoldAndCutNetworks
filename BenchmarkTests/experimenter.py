@@ -19,12 +19,12 @@ from metric_learn import LMNN
 
 # our model imports
 sys.path.append('../')
+from models.model_bank import *
+from models.training import *
 
 
 
-###
 
-benchmarking = {}
 repeat = 5
 lmnn_default_neighbors = 3
 info_length = 3     # train_acc, test_acc, time
@@ -36,6 +36,9 @@ possible_models = ["randomforest", "knn", "cnn", "ours", "metric"]
 
 
 ### HELPER FUNCTIONS ###
+
+class InvalidModelError(ValueError):
+    pass
 
 def get_last_file(dir:str, partial_name:str, insert:str="_d", file_type:str="npy"):
     """
@@ -93,7 +96,7 @@ def build_name(val:bool, info_type:str, iteration):
 
 
 
-def load_data(dataset_name:str, model_name:str, info_type:str, iteration:int, 
+def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:int, 
               val:bool=False, verbose:bool=False):
     """
     Load the data from the most recent numpy file matching the partial name
@@ -162,20 +165,23 @@ def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration,
 ### MODEL FUNCTIONS ###
 
 
-def get_model(model_name:str):
+def get_model(model_name:str, input_size:int=0) -> object:
     """
     Returns a new instance of the model based on the model name.
     Can be "randomforest", "knn", or "metric".
     Parameters:
         model_name (str): The name of the model to train.
+        input_size (int): The dimension of the input data
     Returns:
         model: The model to train
     """
     mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
-            LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else None
+            LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else \
+            OrigamiFold4(input_size) if model_name == "dl_fold" else \
+            OrigamiSoft4(input_size) if model_name == "dl_softfold" else None
     if mdl is None:
-        raise ValueError(f"Invalid model name. Must be 'randomforest', 'knn' or 'metric' not '{model_name}'.")
+        raise InvalidModelError(f"Invalid model name. Must be 'randomforest', 'knn', 'dl_fold', 'dl_softfold' or 'metric' not '{model_name}'.")
     return mdl
 
 
@@ -239,9 +245,42 @@ def run_standard(model, x_train:np.ndarray, y_train:np.ndarray, x_test:np.ndarra
     return y_pred, y_pred_train, end_time - start_time
 
 
+def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray, 
+                      x_test:np.ndarray, y_test:np.ndarray, verbose:int=0):
+    """
+    Train a deep learning model and predict on the test set
+    Parameters:
+        model: model to train
+        x_train (np.ndarray): training data
+        y_train (np.ndarray): training labels
+        x_test (np.ndarray): testing data
+        y_test (np.ndarray): testing labels
+        verbose (int): The verbosity level
+    Returns:
+        np.ndarray: predictions on the test set
+        np.ndarray: predictions on the training set
+        float: average training time
+    """
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    train_loader = load_data(x_train, y_train)
+    val_loader = load_data(x_test, y_test)
+    start_time = time.perf_counter()
+    train_losses, val_losses, train_accuracies, val_accuracies = train(model, optimizer, train_loader, val_loader, epochs=200, verbose=verbose)
+    end_time = time.perf_counter()
+    
+    model.eval()
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    with torch.no_grad():
+        y_pred_trains = [model(x.to(DEVICE)).argmax(dim=1) for x, y in train_loader]
+        y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
+    y_pred_trains = torch.cat(y_pred_trains).cpu().numpy()
+    y_preds = torch.cat(y_preds).cpu().numpy()
+            
+    return y_preds, y_pred_trains, end_time - start_time
+
 
 def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
-                 save_all:bool=True, save_any:bool=True, refresh:bool=True):
+                 save_all:bool=True, save_any:bool=True, refresh:bool=True, verbose:int=0):
     """
     Trains a model on the cancer dataset with different data sizes and saves the accuracy and time data.
     Parameters:
@@ -258,6 +297,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         save_all (bool): Whether to save all the data or just the means and stds
         save_any (bool): Whether to save any data at all
         refresh (bool): Whether to refresh the last file
+        verbose (int): The verbosity level
     Returns:
         results_dict (dict): A dictionary containing the accuracy and time data for each model and iteration
     """
@@ -268,7 +308,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     results_dict = {model_name: {}}
     save_constants = (dataset_name, model_name, datetime)
     
-    progressB = tqdm(total=repeat*len(data_sizes), desc=f"Benchmarking {model_name}")
+    progressB = tqdm(total=repeat*len(data_sizes), desc=f"Benchmarking {repeat} {model_name}s")
     for i in range(repeat):
         time_list = []
         train_acc = []
@@ -278,18 +318,28 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         #     raise ValueError("Not enough classes in the training data")
 
         for size in data_sizes:
+            progressB.set_description(f"Benchmarking {repeat} '{model_name}'s on {size} samples")
+            # set up data sample
             if size is None or size > len(X_train):
                 data_sizes[data_sizes.index(size)] = len(X_train)
                 size = len(X_train)
-            elif model_name == "metric":
-                y_pred, y_pred_train, train_time = run_lmnn(X_train[:size], y_train[:size], X_test)
+            tmp_X_train, tmp_y_train = X_train[:size], y_train[:size]
+            test_size = min(size, len(X_test)//2)
+            tmp_X_test, tmp_y_test = X_test[:test_size], y_test[:test_size]
+            
+            # train the model and get performance results
+            if model_name == "metric":
+                y_pred, y_pred_train, train_time = run_lmnn(tmp_X_train, tmp_y_train, tmp_X_test)
+            elif model_name[:2] == "dl":
+                model = get_model(model_name, input_size=X_train.shape[1])
+                y_pred, y_pred_train, train_time = run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, verbose=verbose)
             else:
                 model = get_model(model_name)
-                y_pred, y_pred_train, train_time = run_standard(model, X_train[:size], y_train[:size], X_test)
+                y_pred, y_pred_train, train_time = run_standard(model, tmp_X_train, tmp_y_train, tmp_X_test, verbose=verbose)
 
             # Done training, now evaluating accuracy
-            acc_train = accuracy_score(y_train[:size], y_pred_train)
-            acc_test = accuracy_score(y_test, y_pred)
+            acc_train = accuracy_score(tmp_y_train, y_pred_train)
+            acc_test = accuracy_score(tmp_y_test, y_pred)
 
             # update lists
             time_list.append(train_time)
@@ -361,15 +411,15 @@ def rebuild_results(benchmarking, all_data=False):
 
         if all_data:
             for i in range(repeat):
-                benchmarking[model_name][i] = {"train_acc": load_data(model_name, "acc", i),
-                                               "val_acc": load_data(model_name, "acc", i, val=True),
-                                               "time": load_data(model_name, "time", i)}
-        benchmarking[model_name]["mean"] = {"train_acc": load_data(model_name, "acc", "mean"),
-                                            "val_acc": load_data(model_name, "acc", "mean", val=True),
-                                            "time": load_data(model_name, "time", "mean")}
-        benchmarking[model_name]["std"] = {"train_acc": load_data(model_name, "acc", "std"),
-                                        "val_acc": load_data(model_name, "acc", "std", val=True),
-                                        "time": load_data(model_name, "time", "std")}
+                benchmarking[model_name][i] = {"train_acc": load_result_data(model_name, "acc", i),
+                                               "val_acc": load_result_data(model_name, "acc", i, val=True),
+                                               "time": load_result_data(model_name, "time", i)}
+        benchmarking[model_name]["mean"] = {"train_acc": load_result_data(model_name, "acc", "mean"),
+                                            "val_acc": load_result_data(model_name, "acc", "mean", val=True),
+                                            "time": load_result_data(model_name, "time", "mean")}
+        benchmarking[model_name]["std"] = {"train_acc": load_result_data(model_name, "acc", "std"),
+                                        "val_acc": load_result_data(model_name, "acc", "std", val=True),
+                                        "time": load_result_data(model_name, "time", "std")}
     return benchmarking
 
 

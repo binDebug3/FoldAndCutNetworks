@@ -14,11 +14,12 @@ class Fold(nn.Module):
     """
     A PyTorch module that performs a folding operation on input tensors along a specified direction.
     """
-    def __init__(self, width: int, leak: float = 0, fold_in: bool = True, has_stretch: bool = False):
+    def __init__(self, width:int, leak:float=0, fold_in:bool=True, has_stretch:bool=False) -> None:
         """
-        Args:
+        Parameters:
             width (int): The expected input dimension.
             crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
+            has_stretch (bool): Whether the module allows stretching.
         """
         super().__init__()
         # Hyperparameters
@@ -39,10 +40,11 @@ class Fold(nn.Module):
             self.stretch = nn.Parameter(torch.tensor(2.0))
         else:
             self.register_buffer('stretch', torch.tensor(2.0))
-            
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    
+    
+    def forward(self, input: torch.Tensor, impact:bool=False) -> torch.Tensor:
         """
-        Args:
+        Parameters:
             input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
         Returns:
             folded (torch.Tensor): The transformed tensor after the folding operation.
@@ -67,6 +69,8 @@ class Fold(nn.Module):
         # Compute the projected and folded values
         projection = scales.unsqueeze(1) * self.n
         folded = input + self.stretch * indicator.unsqueeze(1) * (self.n - projection)
+        if impact:
+            return folded, indicator.sum() / indicator.numel()
         return folded
        
 
@@ -87,11 +91,12 @@ class SoftFold(nn.Module):
         crease (nn.Parameter or float): The sigmoid scaling factor (learnable or fixed).
         has_stretch (bool): Whether the module allows stretching.
     """
-    def __init__(self, width: int, crease: float = None, has_stretch: bool = False):
+    def __init__(self, width:int, crease:float=None, has_stretch:bool=False) -> None:
         """
-        Args:
+        Parameters:
             width (int): The expected input dimension.
             crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
+            has_stretch (bool): Whether the module allows stretching.
         """
         super().__init__()
         # Hyperparameters
@@ -119,6 +124,15 @@ class SoftFold(nn.Module):
 
             
     def crease_dist(self, n_samples=1, std=0.5):
+        """
+        Create the crease parameter by sampling from two normal distributions
+        centered at -1 and 1 with a standard deviation of 0.5.
+        Parameters:
+            n_samples (int): The number of samples to generate.
+            std (float): The standard deviation of the normal distributions.
+        Returns:
+            crease (torch.Tensor): The crease parameter.
+        """
         # Randomly choose which distribution to sample from (50% chance for each mode)
         mode_selector = torch.randint(0, 2, (n_samples,))
         left_mode = torch.randn(n_samples) * std - 1
@@ -126,11 +140,10 @@ class SoftFold(nn.Module):
         return torch.where(mode_selector == 0, left_mode, right_mode)
     
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input:torch.Tensor, impact:bool=False) -> torch.Tensor:
         """
-        Args:
+        Parameters:
             input (torch.Tensor): The input tensor of shape (batch_size, input_dim).
-
         Returns:
             output (torch.Tensor): The transformed tensor after the soft folding operation.
         """
@@ -140,10 +153,8 @@ class SoftFold(nn.Module):
         elif self.width < input.shape[1]:
             raise ValueError(f"Input dimension ({input.shape[1]}) is greater than fold width ({self.width})")
 
-        # Small epsilon for numerical stability
-        eps = 1e-8  
-
         # Compute z_dot_x, n_dot_n, and get scales
+        eps = 1e-8  
         z_dot_x = input @ self.n  # shape: (batch_size,)
         n_dot_n = self.n @ self.n + eps  # shape: (1,)
         scales = z_dot_x / n_dot_n  # shape: (batch_size,)
@@ -156,6 +167,9 @@ class SoftFold(nn.Module):
         # Get the orthogonal projection of the input onto the normal vector and compute the output
         ortho_proj = (1 - scales).unsqueeze(1) * self.n  # shape: (batch_size, width)
         output = input + self.stretch * sigmoid.unsqueeze(1) * ortho_proj  # shape: (batch_size, width)
+        if impact:
+            # count the number of values that are folded
+            return output, (sigmoid > 0.5).float() / sigmoid.numel()
         return output
 
 
@@ -210,9 +224,6 @@ class OrigamiNetwork(nn.Module):
         self.cut_history = []
         self.crease_history = []
         self.regularization = regularization
-        
-        if self.verbose > 1 and self.reg != 0:
-            warnings.warn("Regularization is not implemented yet.")
 
 
     def initialize_layers(self) -> None:
@@ -274,8 +285,14 @@ class OrigamiNetwork(nn.Module):
                 self.optimizer = optim.Adam(self.parameters(), lr = self.learning_rate, weight_decay = self.regularization)
             else:
                 self.optimizer = optim.Adam(self.parameters(), lr = self.learning_rate)
+        elif self.optimizer_type == "adamw":
+            self.optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
+        elif self.optimizer_type == "nadam":
+            self.optimizer = optim.NAdam(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
+        elif self.optimizer_type == "rmsprop":
+            self.optimizer = optim.RMSprop(self.parameters(), lr=self.learning_rate, weight_decay=self.regularization)
         else:
-            raise ValueError("Optimizer must be 'sgd', 'grad', or 'adam'")
+            raise ValueError("Optimizer must be 'sgd', 'grad', 'adam', 'adamw', 'nadam', or 'rmsprop'")
         
         if self.lr_schedule:
             self.schedule = NoamScheduler(self.optimizer, 200, self.width)
