@@ -5,6 +5,7 @@ import torch.nn.functional as F # type: ignore
 import numpy as np # type: ignore
 from tqdm import tqdm # type: ignore
 from torch.utils.data import TensorDataset, DataLoader # type: ignore
+from matplotlib import pyplot as plt # type: ignore
 
 
 
@@ -157,3 +158,25 @@ def train(net, optimizer, train_dataloader, val_dataloader, epochs = 100, DEVICE
     # Close the loop and return the losses and accuracies
     loop.close()
     return train_losses, val_losses, train_accuracies, val_accuracies
+
+
+
+
+################################# Analysis and plotting #################################
+def plot_model(train_losses, val_losses, train_accuracies, val_accuracies):
+    # plot the losses and accuracies
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='val')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(train_accuracies, label='train')
+    plt.plot(val_accuracies, label='val')
+    plt.xlabel('epoch')
+    plt.ylabel('accuracy')
+    plt.legend()
+    plt.show()

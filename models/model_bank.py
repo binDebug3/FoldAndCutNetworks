@@ -90,3 +90,21 @@ class OrigamiNetExample(nn.Module):
         
         # Return the final output
         return x
+    
+    
+#################################### Simple Origami Net Example ####################################
+class Softmax(nn.Module):
+    def __init__(self, dim, classes):
+        super().__init__()
+        self.f1 = nn.Linear(dim, classes)
+
+    def forward(self, x):
+        # flatten the input if it is not already
+        if x.dim() > 2:
+            x = x.view(x.shape[0], -1)
+            
+        # Pass the input through the layers
+        x = self.f1(x)
+        
+        # Return the final output
+        return x
