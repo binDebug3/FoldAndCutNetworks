@@ -8,9 +8,6 @@ from models.folds import Fold, SoftFold
 
 
 #################################### Dynamic Origami Model ####################################
-
-
-
 class DynamicOrigami(nn.Module):
     def __init__(self, architecture, num_classes):
         super().__init__()
@@ -49,9 +46,9 @@ class DynamicOrigami(nn.Module):
             cut = nn.Linear(in_features, self.num_classes)
             self.layers.append(cut)
             
-        except KeyError as e:
-            print(f"--KeyError--\nMissing key: {e}\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
-            raise e
+        except:
+            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
+            raise KeyError
         
         
     def forward(self, x:torch.Tensor) -> torch.Tensor:
@@ -74,8 +71,8 @@ class DynamicOrigami(nn.Module):
 
 
 
-#################################### Testing Networks ####################################
 
+#################################### Testing Networks ####################################
 class OrigamiControl0(nn.Module):
     def __init__(self):
         super().__init__()
@@ -155,4 +152,24 @@ class OrigamiSoft4(nn.Module):
         x = self.f3(x)
         x = self.f4(x)
         x = self.cut(x)
+        return x
+    
+    
+    
+    
+#################################### Softmax Control ####################################
+class Softmax(nn.Module):
+    def __init__(self, dim, classes):
+        super().__init__()
+        self.f1 = nn.Linear(dim, classes)
+
+    def forward(self, x):
+        # flatten the input if it is not already
+        if x.dim() > 2:
+            x = x.view(x.shape[0], -1)
+            
+        # Pass the input through the layers
+        x = self.f1(x)
+        
+        # Return the final output
         return x

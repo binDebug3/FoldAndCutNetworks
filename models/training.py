@@ -2,9 +2,10 @@ import torch                    # type: ignore
 import torch.nn as nn           # type: ignore
 import torch.optim as optim     # type: ignore
 import torch.nn.functional as F # type: ignore
-import numpy as np              # type: ignore
-from tqdm import tqdm           # type: ignore
-from torch.utils.data import TensorDataset, DataLoader # type: ignore   
+import numpy as np # type: ignore
+from tqdm import tqdm # type: ignore
+from torch.utils.data import TensorDataset, DataLoader # type: ignore
+from matplotlib import pyplot as plt # type: ignore
 
 
 
@@ -170,7 +171,7 @@ def train(model, optimizer:torch.optim.Optimizer,
             loss.backward()
             optimizer.step()
             
-            # Update the loop
+            # Append accuracies and losses
             loss_value = loss.item()
             epoch_loss += loss_value
             correct_preds += (y_hat.argmax(dim=1) == y).sum().item()
@@ -200,3 +201,25 @@ def train(model, optimizer:torch.optim.Optimizer,
     if lr_scheduler is not None:
         return train_losses, val_losses, train_accuracies, val_accuracies, learning_rates
     return train_losses, val_losses, train_accuracies, val_accuracies
+
+
+
+
+################################# Analysis and plotting #################################
+def plot_model(train_losses, val_losses, train_accuracies, val_accuracies):
+    # plot the losses and accuracies
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='val')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(train_accuracies, label='train')
+    plt.plot(val_accuracies, label='val')
+    plt.xlabel('epoch')
+    plt.ylabel('accuracy')
+    plt.legend()
+    plt.show()
