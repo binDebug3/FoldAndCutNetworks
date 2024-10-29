@@ -118,7 +118,8 @@ def train(model, optimizer:torch.optim.Optimizer,
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
-          validate_rate:float=0, verbose:int=0, lr_schedule:LRSchedulerWrapper=None):
+          lr_scheduler:LRSchedulerWrapper=None, 
+          validate_rate:float=0, verbose:int=0):
     """
     This function trains the neural network.
     Parameters:
@@ -128,6 +129,7 @@ def train(model, optimizer:torch.optim.Optimizer,
         val_dataloader (DataLoader) - The DataLoader object for the validation set
         epochs (int) - The number of epochs to train the model (default: 100)
         DEVICE (torch.device) - The device to run the calculations on
+        lr_scheduler (LRSchedulerWrapper) - The learning rate scheduler (default: None)
         validate_rate (float) - The rate at which to validate the model (default: 0)
         verbose (int) - The verbosity level (default: 0)
     Returns:
@@ -148,10 +150,9 @@ def train(model, optimizer:torch.optim.Optimizer,
     learning_rates = []
     number_batches = len(train_dataloader)
     val_separation = int(validate_rate * epochs)
-    lr_scheduler = lr_schedule
 
     # Define a loop object to keep track of training and loop through the epochs
-    loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
+    loop = tqdm(total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
@@ -176,12 +177,13 @@ def train(model, optimizer:torch.optim.Optimizer,
             correct_preds += (y_hat.argmax(dim=1) == y).sum().item()
             total_preds += y.size(0)
             if verbose > 1:
-                loop.set_description('epoch:{}/{}, batch: {}/{}, loss:{:.4f}'.format(i+1, epochs, batch_num, number_batches, loss_value))
+                loop.set_description('Training: Epoch:{}/{}, Loss:{:.4f}'.format(i+1, epochs, loss_value))
                 loop.update()
 
-        lr_scheduler.step()
-        lr = optimizer.param_groups[0]['lr']
-        learning_rates.append(lr)
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+            lr = optimizer.param_groups[0]['lr']
+            learning_rates.append(lr)
         
         # Get the average loss for the epoch
         train_losses.append(epoch_loss / number_batches)

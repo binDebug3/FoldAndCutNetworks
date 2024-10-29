@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
-#from metric_learn import LMNN
+from metric_learn import LMNN
 
 #deep learning imports
 from cnn_bench import CNNModel
@@ -404,7 +404,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     results_dict = {model_name: {}}
     save_constants = (dataset_name, model_name, datetime)
     
-    progressB = tqdm(total=repeat*len(data_sizes), desc=f"Benchmarking {repeat} {model_name}s")
+    progressB = tqdm(total=repeat*len(data_sizes), desc=f"Benchmarking {repeat} {model_name}s", disable=verbose!=1)
     for i in range(repeat):
         time_list = []
         train_acc = []
