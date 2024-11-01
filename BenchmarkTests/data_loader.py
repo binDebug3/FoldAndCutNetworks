@@ -21,11 +21,11 @@ import cnn_bench
 
 
 # SETTINGS
-all_benchmark_models = ["randomforest", "knn", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "metric"]
-benchmark_models = all_benchmark_models[2:4]
+all_benchmark_models = ["randomforest", "dl_control", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "knn", "metric"]
+benchmark_models = all_benchmark_models[1:4]
 all_benchmark_datasets = ["digits", "fashionMNIST", "cancer", "cifar10", "imagenet"]
 benchmark_datasets = all_benchmark_datasets[:1]
-default_ratio_list = [0.1, 0.2]
+default_ratio_list = [1]
 
 def unpickle(file):
     import pickle
@@ -253,8 +253,7 @@ def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2
     """
     raise NotImplementedError("This function is not implemented yet.")
 
-config = {"verbose": 1,
-          "random_state": 42,
+config = {"random_state": 42,
           "test_size": 0.2,
           "datasets": 
                 {"cifar10":
@@ -321,7 +320,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
         experiment_info = (dataset_name, sample_sizes, X_train, y_train, X_test, y_test)
         
         # run benchmark
-        model_results = benchmark_ml(model_name, experiment_info, date_time, repeat=repeat)
+        model_results = benchmark_ml(model_name, experiment_info, date_time, repeat=repeat, verbose=verbose)
         results[dataset] = model_results
     
     
