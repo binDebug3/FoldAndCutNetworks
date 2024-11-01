@@ -119,7 +119,7 @@ def train(model, optimizer:torch.optim.Optimizer,
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
-          validate_rate:float=0, verbose:int=0, lr_schedule:LRSchedulerWrapper=None):
+          validate_rate:float=0, verbose:int=0, lr_schedule=None):
     """
     This function trains the neural network.
     Parameters:
@@ -149,7 +149,7 @@ def train(model, optimizer:torch.optim.Optimizer,
     learning_rates = []
     number_batches = len(train_dataloader)
     val_separation = int(validate_rate * epochs)
-    lr_scheduler = lr_schedule
+    lr_scheduler = LRSchedulerWrapper(lr_schedule)
 
     # Define a loop object to keep track of training and loop through the epochs
     loop = tqdm(desc="Training", total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
