@@ -116,12 +116,17 @@ class SoftFold(nn.Module):
         self.n = nn.Parameter(n)
 
         # Initialize crease parameter
-        self.crease = nn.Parameter(self.crease_dist()) if crease is None else \
-                        self.register_buffer('crease', torch.tensor(crease))
+        if crease is None:
+            self.crease= nn.Parameter(self.crease_dist())
+        else:
+            self.register_buffer('crease', torch.tensor(crease))
             
         # Initialize stretch as a parameter if needed
-        self.stretch = nn.Parameter(torch.tensor(2.0)) if self.has_stretch else \
-                        self.register_buffer('stretch', torch.tensor(2.0))
+        if self.has_stretch:
+            self.stretch = nn.Parameter(torch.tensor(2.0))
+        else:
+            self.register_buffer('stretch', torch.tensor(2.0))
+        
 
             
     def crease_dist(self, n_samples=1, std=0.5):
@@ -167,5 +172,7 @@ class SoftFold(nn.Module):
         sigmoid = torch.sigmoid(p)          # shape: (batch_size,)
 
         # Get the orthogonal projection of the input onto the normal vector and compute the output
-        ortho_proj = (1 - scales).unsqueeze(1) * self.n                          # shape: (batch_size, width)
+        ortho_proj = (1 - scales).unsqueeze(1) * self.n 
+        
+                                 # shape: (batch_size, width)
         return input_tensor + self.stretch * sigmoid.unsqueeze(1) * ortho_proj   # shape: (batch_size, width)
