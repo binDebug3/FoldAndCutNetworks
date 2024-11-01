@@ -141,7 +141,7 @@ def train(model, optimizer:torch.optim.Optimizer,
     """
     # Get the device if it is not already defined
     DEVICE = DEVICE or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if verbose > 2:
+    if verbose > 1:
         print(f"Working Device: {DEVICE}")
     model.to(DEVICE)
     
@@ -153,7 +153,7 @@ def train(model, optimizer:torch.optim.Optimizer,
     val_separation = int(validate_rate * epochs)
 
     # Define a loop object to keep track of training and loop through the epochs
-    loop = tqdm(total=epochs*number_batches, position=0, leave=True, disable=verbose<=1)
+    loop = tqdm(total=epochs*number_batches, position=0, leave=True, disable=verbose==0)
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
@@ -177,7 +177,7 @@ def train(model, optimizer:torch.optim.Optimizer,
             epoch_loss += loss_value
             correct_preds += (y_hat.argmax(dim=1) == y).sum().item()
             total_preds += y.size(0)
-            if verbose > 1:
+            if verbose > 0:
                 loop.set_description('Training: Epoch:{}/{}, Loss:{:.4f}'.format(i+1, epochs, loss_value))
                 loop.update()
 

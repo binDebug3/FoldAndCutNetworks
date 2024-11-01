@@ -30,7 +30,7 @@ from models.training import *
 
 repeat = 5
 lmnn_default_neighbors = 3
-info_length = 3     # train_acc, test_acc, time
+info_length = 5     # train_acc, test_acc, time
 date_format = "%y%m%d@%H%M"
 possible_models = ["randomforest", "knn", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "metric"]
 
@@ -342,7 +342,8 @@ def run_standard(model, x_train:np.ndarray, y_train:np.ndarray, x_test:np.ndarra
 
 
 def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray, 
-                      x_test:np.ndarray, y_test:np.ndarray, verbose:int=0):
+                      x_test:np.ndarray, y_test:np.ndarray, 
+                      return_training:bool=True, verbose:int=0):
     """
     Train a deep learning model and predict on the test set
     Parameters:
@@ -361,18 +362,21 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
     train_loader = load_data(x_train, y_train)
     val_loader = load_data(x_test, y_test)
     start_time = time.perf_counter()
-    train_losses, val_losses, train_accuracies, val_accuracies = train(model, optimizer, train_loader, val_loader, epochs=200, verbose=verbose)
+    train_losses, val_losses, train_accuracies, val_accuracies = train(model, optimizer, train_loader, val_loader, 
+                                                                       validate_rate=0.05, epochs=200, verbose=verbose)
     end_time = time.perf_counter()
     
-    model.eval()
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    with torch.no_grad():
-        y_pred_trains = [model(x.to(DEVICE)).argmax(dim=1) for x, y in train_loader]
-        y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
-    y_pred_trains = torch.cat(y_pred_trains).cpu().numpy()
-    y_preds = torch.cat(y_preds).cpu().numpy()
-            
-    return y_preds, y_pred_trains, end_time - start_time
+    if not return_training:
+        model.eval()
+        DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        with torch.no_grad():
+            y_pred_trains = [model(x.to(DEVICE)).argmax(dim=1) for x, y in train_loader]
+            y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
+        y_pred_trains = torch.cat(y_pred_trains).cpu().numpy()
+        y_preds = torch.cat(y_preds).cpu().numpy()  
+        return y_preds, y_pred_trains, end_time - start_time
+    
+    return train_losses, val_losses, train_accuracies, val_accuracies, end_time - start_time
 
 
 def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
@@ -397,6 +401,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     Returns:
         results_dict (dict): A dictionary containing the accuracy and time data for each model and iteration
     """
+    val_length = 20
     if not save_any:
         save_all = False
     # unpack experiment info
@@ -404,80 +409,86 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     results_dict = {model_name: {}}
     save_constants = (dataset_name, model_name, datetime)
     
-    progressB = tqdm(total=repeat*len(data_sizes), desc=f"Benchmarking {repeat} {model_name}s", disable=verbose!=1)
     for i in range(repeat):
-        time_list = []
-        train_acc = []
-        val_acc = []
         # X_train, y_train = shuffle(X_train, y_train, random_state=i)
         # if len(np.unique(y_train)) < 2:
         #     raise ValueError("Not enough classes in the training data")
 
-        for size in data_sizes:
-            progressB.set_description(f"Benchmarking {repeat} '{model_name}'s on {size} samples")
-            # set up data sample
-            if size is None or size > len(X_train):
-                data_sizes[data_sizes.index(size)] = len(X_train)
-                size = len(X_train)
-            tmp_X_train, tmp_y_train = X_train[:size], y_train[:size]
-            test_size = min(size, len(X_test)//2)
-            tmp_X_test, tmp_y_test = X_test[:test_size], y_test[:test_size]
-            
-            # train the model and get performance results
-            if model_name == "metric":
-                y_pred, y_pred_train, train_time = run_lmnn(tmp_X_train, tmp_y_train, tmp_X_test)
-            elif model_name[:2] == "dl":
-                model = get_model(model_name, input_size=X_train.shape[1])
-                y_pred, y_pred_train, train_time = run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, verbose=verbose)
-            else:
-                model = get_model(model_name)
-                y_pred, y_pred_train, train_time = run_standard(model, tmp_X_train, tmp_y_train, tmp_X_test, verbose=verbose)
-
-            # Done training, now evaluating accuracy
+        # set up data sample
+        size = data_sizes[-1]
+        if size is None or size > len(X_train):
+            data_sizes[data_sizes.index(size)] = len(X_train)
+            size = len(X_train)
+        tmp_X_train, tmp_y_train = X_train[:size], y_train[:size]
+        test_size = min(size, len(X_test)//2)
+        tmp_X_test, tmp_y_test = X_test[:test_size], y_test[:test_size]
+        
+        # train the model and get performance results
+        if model_name[:2] == "dl":
+            model = get_model(model_name, input_size=X_train.shape[1])
+            train_losses, val_losses, train_accuracies, val_accuracies, train_time = run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, verbose=verbose)
+        else:
+            model = get_model(model_name)
+            func = run_standard if model_name != "metric" else run_lmnn
+            y_pred, y_pred_train, train_time = func(model, tmp_X_train, tmp_y_train, tmp_X_test, verbose=verbose)
+            # evaluating accuracy
             acc_train = accuracy_score(tmp_y_train, y_pred_train)
             acc_test = accuracy_score(tmp_y_test, y_pred)
+            train_accuracies = [acc_train]*val_length
+            val_accuracies = [acc_test]*val_length
+            train_losses = [0]*val_length
+            val_losses = [0]*val_length
 
-            # update lists
-            time_list.append(train_time)
-            train_acc.append(acc_train)
-            val_acc.append(acc_test)
-            progressB.update(1)
 
         # Done evaluating, now saving data
-        train_acc = np.array(train_acc)
-        val_acc = np.array(val_acc)
-        time_list = np.array(time_list)
+        train_acc = np.array(train_accuracies)
+        val_acc = np.array(val_accuracies)
+        train_loss = np.array(train_losses)
+        val_loss = np.array(val_losses)
+        time_list = np.array(train_time)
         if save_all:
             for j, data, info_type in zip(range(info_length), 
-                                          [train_acc, val_acc, time_list], 
-                                          ["acc", "acc", "time"]):
+                                          [train_loss, val_loss, train_acc, val_acc, time_list], 
+                                          ["loss", "loss", "acc", "acc", "time"]):
                 save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh)
-        results_dict[model_name][i] = {"train_acc": train_acc, "val_acc": val_acc, "time": time_list}
-    progressB.close()
+        results_dict[model_name][i] = {"train_loss": train_loss, "val_loss": val_loss,
+                                        "train_acc": train_acc, "val_acc": val_acc,
+                                        "time": time_list}
 
 
     # Done benchmarking, calculate means and stds and saving them
+    train_losses = np.array([results_dict[model_name][i]["train_loss"] for i in range(repeat)])
+    val_losses = np.array([results_dict[model_name][i]["val_loss"] for i in range(repeat)])
     train_accs = np.array([results_dict[model_name][i]["train_acc"] for i in range(repeat)])
     val_accs = np.array([results_dict[model_name][i]["val_acc"] for i in range(repeat)])
     times = np.array([results_dict[model_name][i]["time"] for i in range(repeat)])
+    train_loss_mean = np.mean(train_losses, axis=0)
+    val_loss_mean = np.mean(val_losses, axis=0)
     train_acc_mean = np.mean(train_accs, axis=0)
     val_acc_mean = np.mean(val_accs, axis=0)
     time_mean = np.mean(times, axis=0)
+    train_loss_std = np.std(train_losses, axis=0)
+    val_loss_std = np.std(val_losses, axis=0)
     train_acc_std = np.std(train_accs, axis=0)
     val_acc_std = np.std(val_accs, axis=0)
     time_std = np.std(times, axis=0)
 
     # save means and stds
     if not save_any:
-        data_list = [train_acc_mean, val_acc_mean, time_mean, train_acc_std, val_acc_std, time_std]
-        type_list = ["acc", "acc", "time"]*2
-        val_list = [False, True, False]*2
-        name_list = ["mean",]*3 + ["std",]*3
+        data_list = [train_loss_mean, val_loss_mean, train_acc_mean, val_acc_mean, time_mean, 
+                     train_loss_std, train_loss_std, train_acc_std, val_acc_std, time_std]
+        type_list = ["val", "val", "acc", "acc", "time"]*2
+        val_list = [False, True, False, True, False]*2
+        name_list = ["mean",]*5 + ["std",]*5
         for data, info_type, name, val in zip(data_list, name_list, type_list, val_list):
             save_data(data, save_constants, info_type, name, val=val, refresh=refresh)
         
-    results_dict[model_name]["mean"] = {"train_acc": train_acc_mean, "val_acc": val_acc_mean, "time": time_mean}
-    results_dict[model_name]["std"] = {"train_acc": train_acc_std, "val_acc": val_acc_std, "time": time_std}
+    results_dict[model_name]["mean"] = {"train_loss": train_loss_mean, "val_loss": val_loss_mean,
+                                        "train_acc": train_acc_mean, "val_acc": val_acc_mean, 
+                                        "time": time_mean}
+    results_dict[model_name]["std"] = {"train_loss": train_loss_std, "val_loss": val_loss_std,
+                                        "train_acc": train_acc_std, "val_acc": val_acc_std, 
+                                        "time": time_std}
     return results_dict
 
 
@@ -507,13 +518,19 @@ def rebuild_results(benchmarking, all_data=False):
 
         if all_data:
             for i in range(repeat):
-                benchmarking[model_name][i] = {"train_acc": load_result_data(model_name, "acc", i),
+                benchmarking[model_name][i] = {"train_loss": load_result_data(model_name, "loss", i),
+                                                "val_loss": load_result_data(model_name, "loss", i, val=True),
+                                                "train_acc": load_result_data(model_name, "acc", i),
                                                "val_acc": load_result_data(model_name, "acc", i, val=True),
                                                "time": load_result_data(model_name, "time", i)}
-        benchmarking[model_name]["mean"] = {"train_acc": load_result_data(model_name, "acc", "mean"),
+        benchmarking[model_name]["mean"] = {"train_loss": load_result_data(model_name, "loss", "mean"),
+                                            "val_loss": load_result_data(model_name, "loss", "mean", val=True),
+                                            "train_acc": load_result_data(model_name, "acc", "mean"),
                                             "val_acc": load_result_data(model_name, "acc", "mean", val=True),
                                             "time": load_result_data(model_name, "time", "mean")}
-        benchmarking[model_name]["std"] = {"train_acc": load_result_data(model_name, "acc", "std"),
+        benchmarking[model_name]["std"] = {"train_loss": load_result_data(model_name, "loss", "std"),
+                                        "val_loss": load_result_data(model_name, "loss", "std", val=True),
+                                        "train_acc": load_result_data(model_name, "acc", "std"),
                                         "val_acc": load_result_data(model_name, "acc", "std", val=True),
                                         "time": load_result_data(model_name, "time", "std")}
     return benchmarking
