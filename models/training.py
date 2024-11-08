@@ -153,7 +153,7 @@ def train(model, optimizer:torch.optim.Optimizer,
     lr_scheduler = LRSchedulerWrapper(lr_schedule)
 
     # Define a loop object to keep track of training and loop through the epochs
-    loop = tqdm(total=epochs*number_batches, position=0, leave=True, disable=verbose==0)
+    loop = tqdm(total=epochs, position=0, leave=True, disable=verbose==0)
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
@@ -177,9 +177,9 @@ def train(model, optimizer:torch.optim.Optimizer,
             epoch_loss += loss_value
             correct_preds += (y_hat.argmax(dim=1) == y).sum().item()
             total_preds += y.size(0)
-            if verbose > 0:
-                loop.set_description('Training: Epoch:{}/{}, Loss:{:.4f}'.format(i+1, epochs, loss_value))
-                loop.update()
+        if verbose > 0:
+            loop.set_description('Training: Epoch:{}/{}, Loss:{:.4f}'.format(i+1, epochs, loss_value))
+            loop.update()
 
         if lr_scheduler is not None:
             lr_scheduler.step()
