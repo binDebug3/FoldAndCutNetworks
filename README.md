@@ -146,15 +146,15 @@ git push origin :newbranch      # Tell your fork to delete the example branch.
 [linkedIn-icon]: https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white
 [linkedIn-url1]: https://www.linkedin.com/in/dallinstewart/
 [linkedIn-url2]: https://www.linkedin.com/in/
-[linkedIn-url3]: https://www.linkedin.com/in/
+[linkedIn-url3]: https://www.linkedin.com/in/jeddy-bennett/
 
 
 [github-icon]: https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white
 [github-url1]: https://github.com/binDebug3
 [github-url2]: https://github.com/
-[github-url3]: https://github.com/
+[github-url3]: https://github.com/jeddybennett
 
 [Email-icon]: https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white
 [Email-url1]: mailto:dallinpstewart@gmail.com
 [Email-url2]: mailto:dallinpstewart@gmail.com
-[Email-url3]: mailto:dallinpstewart@gmail.com
+[Email-url3]: mailto:jeddybennett01@gmail.com
