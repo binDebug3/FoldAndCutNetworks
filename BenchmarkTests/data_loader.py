@@ -8,6 +8,7 @@ import pandas as pd
 # datasets
 from sklearn.datasets import load_breast_cancer, load_digits
 from torchvision import datasets
+from pmlb import fetch_data
 
 # models
 import torch
@@ -32,6 +33,48 @@ def unpickle(file):
     with open(file, 'rb') as fo:
         dict = pickle.load(fo, encoding='bytes')
     return dict
+
+def load_pmlb_dataset(dataset_name:str, astorch:bool=False, shuffle:bool=True, random_state:int=None, test_size:float=0.2, verbose:int=0) -> tuple:
+    """
+    This function loads a dataset from the PMLB library.
+        Examples Datasets are:
+            "titanic", "sleep", "connect_4", "covertype", "mfeat_pixel", "dna"
+            For more information on the datasets, see: https://epistasislab.github.io/pmlb/index.html
+            This will show you the available datasets, their names, and if they're for classification or regression tasks
+    Parameters:
+            dataset_name (str): The name of the dataset to load.
+            astorch (bool): default=False. If True, load the data as torch tensors.
+            shuffle (bool): default=True. If True, shuffle the data.
+            random_state (int): default=None. The random state to use when splitting the data.
+            test_size (float): default=0.2. The proportion of the data to use as the test set.
+            verbose (int): default=0. If 1, print the shape of the data and the target.
+    Returns:
+            X_train (np.ndarray) or (torch.tensor): The training data.
+            X_test (np.ndarray) or (torch.tensor): The testing data.
+            y_train (np.ndarray) or (torch.tensor): The training target.
+            y_test (np.ndarray) or (torch.tensor): The testing target."""
+    
+    X,y = fetch_data(dataset_name, return_X_y=True)
+
+    if shuffle and verbose > 1:
+        print("\tShuffling:", end=" ")
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
+                                                        random_state=random_state, shuffle=shuffle)
+    if verbose > 1:
+        print(f"\n\tTrain set has {len(set(y_train))} classes and test set has {len(set(y_test))} classes")
+    
+    if verbose > 0:
+        print("\tX shape: ", X_train.shape)
+        print("\ty shape: ", y_train.shape)
+
+    if astorch:
+        X_train = torch.tensor(X_train)
+        X_test = torch.tensor(X_test)
+        y_train = torch.tensor(y_train)
+        y_test = torch.tensor(y_test)
+    
+    return X_train, X_test, y_train, y_test
 
 
 def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, test_size:float=0.2, verbose:bool=0) -> tuple:
