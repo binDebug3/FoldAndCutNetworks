@@ -79,7 +79,7 @@ Dallin Stewart - dallinpstewart@gmail.com
 [![GitHub][github-icon]][github-url1]
 [![Email][email-icon]][email-url1]
 
-Jeddy Bennett
+Jeddy Bennett - jeddybennett01@gmail.com
 
 [![LinkedIn][linkedin-icon]][linkedin-url3]
 [![GitHub][github-icon]][github-url3]
