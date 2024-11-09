@@ -1,35 +1,35 @@
 # fundamentals
 import sys
 import warnings
+import json
+import pickle
 import datetime as dt
-import numpy as np
-import pandas as pd
+import numpy as np      # type: ignore
+import pandas as pd     # type: ignore
 
 # datasets
-from sklearn.datasets import load_breast_cancer, load_digits
-from torchvision import datasets
+from sklearn.datasets import load_breast_cancer, load_digits# type: ignore
+from torchvision import datasets    # type: ignore
 from pmlb import fetch_data
 
 # models
-import torch
-from torchvision.transforms import ToTensor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+import torch    # type: ignore
+from torchvision.transforms import ToTensor                 # type: ignore
+from sklearn.model_selection import train_test_split        # type: ignore
+from sklearn.preprocessing import StandardScaler            # type: ignore
 
 # our files
 from experimenter import *
 import cnn_bench
 
 
-# SETTINGS
-all_benchmark_models = ["randomforest", "dl_control", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "knn", "metric"]
-benchmark_models = all_benchmark_models[1:4]
-all_benchmark_datasets = ["digits", "fashionMNIST", "cancer", "cifar10", "imagenet"]
-benchmark_datasets = all_benchmark_datasets[:1]
-default_ratio_list = [1]
 
-def unpickle(file):
-    import pickle
+def unpickle(file:str) -> dict:
+    """
+    This function loads a pickle file.
+    Parameters:
+        file (str): The file path.
+    """
     with open(file, 'rb') as fo:
         dict = pickle.load(fo, encoding='bytes')
     return dict
@@ -296,27 +296,6 @@ def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2
     """
     raise NotImplementedError("This function is not implemented yet.")
 
-config = {"random_state": 42,
-          "test_size": 0.2,
-          "datasets": 
-                {"cifar10":
-                    {"func": load_cifar10,
-                    "data_ratios": default_ratio_list},
-                "fashionMNIST":
-                    {"func": load_fashion,
-                    "data_ratios": default_ratio_list},
-                "digits":
-                    {"func": load_digits_data,
-                    "data_ratios": default_ratio_list},
-                "cancer":
-                    {"func": load_cancer,
-                    "data_ratios": default_ratio_list},
-                "imagenet":
-                    {"func": load_imagenet,
-                    "data_ratios": default_ratio_list}
-            }
-        }
-
 
 
 def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=False, return_sizes:bool=False, repeat:int=5, verbose:int=0) -> dict:
@@ -333,6 +312,19 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
         model_results (dict): The results of the benchmark.
     """
     # validate inputs
+    with open("config.json", "r") as f:
+        settings = json.load(f)
+    all_benchmark_models = settings["all_benchmark_models"]
+    all_benchmark_datasets = settings["all_benchmark_datasets"]
+    ratio_list = settings["default_ratio_list"]
+    rs = settings["random_state"]
+    test_size = settings["test_size"]
+    config = {"cifar10": load_cifar10,
+            "fashionMNIST": load_fashion,
+            "digits": load_digits_data,
+            "cancer": load_cancer,
+            "imagenet": load_imagenet}
+    
     assert model_name in all_benchmark_models, f"model_name '{model_name}' must be one of {all_benchmark_models}"
     if dataset_name is not None:
         assert type(dataset_name) == str, "dataset must be a string"
@@ -349,16 +341,16 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     sample_size_list = []
     for dataset in datasets:
         if verbose > 0:
-            print(f"Testing {model_name} on {dataset}")
+            print(f"\nTesting {model_name} on {dataset}")
         
         # load data
-        data_loader = config["datasets"][dataset]["func"]
-        X_train, X_test, y_train, y_test = data_loader(random_state=config["random_state"], 
-                                                       test_size=config["test_size"], 
+        data_loader = config[dataset]
+        X_train, X_test, y_train, y_test = data_loader(random_state=rs, 
+                                                       test_size=test_size, 
                                                        astorch=astorch, 
                                                        verbose=verbose)
         train_size = len(X_train)
-        sample_sizes = [int(ratio*train_size) for ratio in config["datasets"][dataset]["data_ratios"]]
+        sample_sizes = [int(ratio*train_size) for ratio in ratio_list]
         sample_size_list.append(sample_sizes)
         experiment_info = (dataset_name, sample_sizes, X_train, y_train, X_test, y_test)
         

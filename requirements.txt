@@ -6,3 +6,5 @@ pandas
 tqdm
 metric-learn
 jeffutils
+kaleido
+plotly
