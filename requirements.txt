@@ -1,0 +1,10 @@
+torch
+numpy
+matplotlib
+scikit-learn
+pandas
+tqdm
+metric-learn
+jeffutils
+kaleido
+plotly

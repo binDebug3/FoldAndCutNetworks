@@ -298,7 +298,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     sample_size_list = []
     for dataset in datasets:
         if verbose > 0:
-            print(f"Testing {model_name} on {dataset}")
+            print(f"\nTesting {model_name} on {dataset}")
         
         # load data
         data_loader = config[dataset]

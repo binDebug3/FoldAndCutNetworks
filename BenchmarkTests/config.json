@@ -1,16 +1,16 @@
 {
     "all_benchmark_models": ["randomforest", "dl_control", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "knn", "metric"],
-    "benchmark_models": ["dl_control", "dl_fold"],
+    "benchmark_models": ["dl_softfold", "dl_fold"],
     "all_benchmark_datasets": ["digits", "fashionMNIST", "cancer", "cifar10", "imagenet"],
-    "benchmark_datasets": ["digits"],
+    "benchmark_datasets": ["digits", "fashionMNIST"],
     "possible_models": ["randomforest", "knn", "dl_fold", "dl_softfold", "dl_cnn", "dl_resnet", "metric"],
     "info_list": ["train_loss", "val_loss", "train_acc", "val_acc", "time_list"],
     "info_titles": ["loss", "loss", "acc", "acc", "time"],
-    "default_ratio_list": [0.4],
-    "repeat": 2,
+    "default_ratio_list": [0.1],
+    "repeat": 3,
     "verbose": 2,
     "random_state": 42,
     "test_size": 0.2,
-    "num_epochs": 200,
+    "num_epochs": 75,
     "date_format": "%y%m%d@%H%M"
   }

@@ -4,6 +4,7 @@ import time
 import json
 import datetime as dt
 import itertools
+import math
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
 from jeffutils.utils import stack_trace             # type: ignore
@@ -11,6 +12,8 @@ from jeffutils.utils import stack_trace             # type: ignore
 
 # plotting imports
 import matplotlib.pyplot as plt                     # type: ignore
+import plotly.graph_objects as go                   # type: ignore
+from plotly.subplots import make_subplots           # type: ignore
 
 # ml imports
 from sklearn.metrics import accuracy_score          # type: ignore
@@ -460,7 +463,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
                 save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh, repeat=repeat)
         results_dict[model_name][i] = {"train_loss": train_loss, "val_loss": val_loss,
                                         "train_acc": train_acc, "val_acc": val_acc,
-                                        "time": time_list}
+                                        "time_list": time_list}
 
 
     # Done benchmarking, calculate means and stds and saving them
@@ -516,7 +519,8 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
                 print("Skipping", model_name, "because it is already loaded")
             continue
         folder = build_dir(dataset_name, model_name)
-        if os.path.exists(folder) and len(os.listdir(folder)) == 0:
+        exists = os.path.exists(folder)
+        if not exists or (exists and len(os.listdir(folder)) == 0):
             if verbose > 1:
                 print(f"Skipping '{model_name}' because the folder is empty")
             continue
@@ -525,28 +529,152 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
 
         benchmarking[model_name] = {}
 
+        metrics = ["loss", "acc", "time"]
+        stats = ["mean", "std"]
+
+        # Loop over repeat iterations if needed
         if all_data:
             for i in range(repeat):
-                benchmarking[model_name][i] = {"train_loss": load_result_data(dataset_name, model_name, "loss", i),
-                                                "val_loss": load_result_data(dataset_name, model_name, "loss", i, val=True),
-                                                "train_acc": load_result_data(dataset_name, model_name, "acc", i),
-                                               "val_acc": load_result_data(dataset_name, model_name, "acc", i, val=True),
-                                               "time": load_result_data(dataset_name, model_name, "time", i)}
-        benchmarking[model_name]["mean"] = {"train_loss": load_result_data(dataset_name, model_name, "loss", "mean"),
-                                            "val_loss": load_result_data(dataset_name, model_name, "loss", "mean", val=True),
-                                            "train_acc": load_result_data(dataset_name, model_name, "acc", "mean"),
-                                            "val_acc": load_result_data(dataset_name, model_name, "acc", "mean", val=True),
-                                            "time": load_result_data(dataset_name, model_name, "time", "mean")}
-        benchmarking[model_name]["std"] = {"train_loss": load_result_data(dataset_name, model_name, "loss", "std"),
-                                        "val_loss": load_result_data(dataset_name, model_name, "loss", "std", val=True),
-                                        "train_acc": load_result_data(dataset_name, model_name, "acc", "std"),
-                                        "val_acc": load_result_data(dataset_name, model_name, "acc", "std", val=True),
-                                        "time": load_result_data(dataset_name, model_name, "time", "std")}
-    return benchmarking
+                benchmarking[model_name][i] = {f"{metric}": {stat: load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
+                                                            for metric in metrics for stat in stats}
+                                            for metric in metrics}
+
+        # Handle mean and std for benchmarking
+        for stat in stats:
+            benchmarking[model_name][stat] = {f"{metric}": load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
+                                            for metric in metrics}
+        return benchmarking
 
 
+def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
+                 save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
+                 errors:str='raise', rows:int=1, verbose:int=0) -> None:
+    """
+    Plot the benchmarking results, Duplicate of plot_results but with plotly
+    Parameters:
+        benchmarking (dict): dictionary containing the benchmarking results
+        constants (tuple): contains
+            data_sizes (list(int)): list of data sizes
+            datetime (str): current date and time
+            dataset_name (str): name of the dataset
+        scale (int): scale of the figure
+        repeat (int): number of times to repeat the experiment
+        save_fig (bool): whether to save the figure
+        replace_fig (bool): whether to replace the old figure
+        from_data (bool): whether to load the data from the numpy files
+        errors (str): how to handle errors
+        rows (str): how to arrange the subplots
+        verbose (int): the verbosity level
+    """
+    assert errors in ["raise", "ignore", "flag"], f"'errors' must be 'raise', 'ignore', or 'flag' not '{errors}'"
+    assert len(constants) == 3, f"constants must have 3 elements not {len(constants)}"
+    assert type(scale) == int, f"'scale' must be an integer not {type(scale)}"
+    assert scale > 0 and scale < 20, f"'scale' must be between 0 and 20 not {scale}"
+    assert type(repeat) == int, f"'repeat' must be an integer not {type(repeat)}"
+    assert repeat > 0, f"'repeat' must be greater than 0 not {repeat}"
+    assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
+    assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
+    assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
+    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}"
+    assert rows > 0, f"'cols' must be greater than 0 not {rows}"
+    
+    data_sizes, datetime, dataset_name = constants
+    info_ylabels = ["Loss", "Loss", "Accuracy (%)", "Accuracy (%)", "Training Time (s)"] #, "Prediction Time (s)"
+    colors = [
+        (27,158,119,0.2),  # '#1b9e77'
+        (217,95,2,0.2),    # '#d95f02'
+        (117,112,179,0.2), # '#7570b3'
+        (231,41,138,0.2),  # '#e7298a'
+        (102,166,30,0.2)   # '#66a61e'
+    ]
+    n_epochs = json.load(open(config_path)).get("num_epochs")
+    info_list = json.load(open(config_path)).get("info_list")
+    info_length = len(info_list)
+    pnt_density = 20
+    cols = math.ceil(info_length / rows)
+    first=True
+
+    if from_data:
+        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat)
+
+    loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
+    subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=subs)
+    for j, (model_name, model_results) in enumerate(benchmarking.items()):
+        for i, (info_type, means), (_, stds) in zip(range(info_length), model_results["mean"].items(), model_results["std"].items()):
+            loop.update()
+            try:
+                start = 0
+                if type(means) == np.float64:
+                    means = np.array([means])
+                    stds = np.array([model_results["std"][info_type]])
+                    start = j
+                if len(means) > pnt_density:
+                    # downsample the 1d means data where pnt_density is the number of points desired
+                    sep = max(int(len(means) / pnt_density), 1)
+                    means = means[::sep]
+                    stds = stds[::sep]
+                domain = np.linspace(start, n_epochs, len(means))
+            except TypeError as e:
+                if errors == "raise":
+                    raise e
+                if errors == "ignore":
+                    continue
+                if errors == "flag":
+                    print("Error with", model_name, info_type, "-", e)
+                    continue
+            row = (i // cols) + 1  # Calculate row number
+            col = (i % cols) + 1   # Calculate column number
+            fig.add_trace(
+                go.Scatter(x=domain, y=means, mode='lines+markers', name=model_name,
+                        line=dict(color=f"rgb{colors[j][:-1]}"), showlegend=first),
+                row=row, col=col
+            )
+            fig.add_trace(
+                go.Scatter(x=domain, y=means + stds, mode='lines', line=dict(width=0),
+                        fill='tonexty', fillcolor=f"rgba{colors[j]}", showlegend=False),
+                row=row, col=col
+            )
+            fig.add_trace(
+                go.Scatter(x=domain, y=means - stds, mode='lines', line=dict(width=0),
+                        fill='tonexty', fillcolor=f"rgba{colors[j]}", showlegend=False),
+                row=row, col=col
+            )
+            fig.update_xaxes(title_text="Epoch", row=row, col=col)
+            fig.update_yaxes(title_text=info_ylabels[i], row=row, col=col)
+            if "acc" in info_type:
+                fig.add_hline(y=1, line=dict(color='black', dash='dash'), row=row, col=col)
+            if "time" in info_type:
+                fig.update_yaxes(type="log", row=row, col=col)
+            first=False
+
+    # Update layout for the overall title
+    fig.update_layout(
+        title=f"Model Benchmarking on '{dataset_name}'",
+        showlegend=True,
+        height=300*rows,  # You can adjust the height
+        width=1200,  # You can adjust the width
+    )
+    loop.close()
+
+    # save and show the figure
+    if save_fig:
+        if verbose > 0:
+            print("Saving your figure...")
+        fig_path = f"results/{dataset_name}/charts/"
+        fig_name = f"benchmarking_{datetime}.png"
+        if not os.path.exists(fig_path):
+            os.makedirs(fig_path)
+        if replace_fig:
+            replace_path = get_last_file(fig_path, "benchmarking", insert="_", file_type="png")
+            if replace_path is not None:
+                os.remove(replace_path)
+        fig.write_image(os.path.join(fig_path, fig_name))
+    fig.show()
+    
 def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
-                 save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, errors:str='raise') -> None:
+                 save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
+                 errors:str='raise', rows:int=1, verbose:int=0) -> None:
     """
     Plot the benchmarking results
     Parameters:
@@ -561,6 +689,8 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
         replace_fig (bool): whether to replace the old figure
         from_data (bool): whether to load the data from the numpy files
         errors (str): how to handle errors
+        rows (str): how to arrange the subplots
+        verbose (int): the verbosity level
     """
     assert errors in ["raise", "ignore", "flag"], f"'errors' must be 'raise', 'ignore', or 'flag' not '{errors}'"
     assert len(constants) == 3, f"constants must have 3 elements not {len(constants)}"
@@ -571,46 +701,66 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
     assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
     assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
+    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}"
+    assert rows > 0, f"'cols' must be greater than 0 not {rows}"
     
     data_sizes, datetime, dataset_name = constants
-    info_ylabels = ["Accuracy (%)", "Accuracy (%)", "Training Time (s)"] #, "Prediction Time (s)"
+    info_ylabels = ["Loss", "Loss", "Accuracy (%)", "Accuracy (%)", "Training Time (s)"] #, "Prediction Time (s)"
     colors = ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e']
     n_epochs = json.load(open(config_path)).get("num_epochs")
     info_list = json.load(open(config_path)).get("info_list")
     info_length = len(info_list)
+    pnt_density = 20
+    cols = math.ceil(info_length / rows)
 
     if from_data:
         benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat)
-
-    plt.figure(figsize=(scale*info_length, scale), dpi=120)
+    
+    subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
+    loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
+    plt.figure(figsize=(scale*cols, scale*rows), dpi=25*scale)
     for j, (model_name, model_results) in enumerate(benchmarking.items()):
-        for i, (info_type, means), (_, stds) in zip(range(info_length), model_results["mean"].items(), model_results["std"].items()):
+        for i, (info_type, means), (_, stds), subtitle in zip(range(info_length), model_results["mean"].items(), model_results["std"].items(), subs):
+            loop.update()
             try:
-                domain = np.linspace(0, n_epochs, len(means))
+                start = 0
+                if type(means) == np.float64:
+                    means = np.array([means])
+                    stds = np.array([stds])
+                    start = j
+                if len(means) > pnt_density:
+                    # downsample the 1d means data where pnt_density is the number of points desired
+                    sep = max(int(len(means) / pnt_density), 1)
+                    means = means[::sep]
+                    stds = stds[::sep]
+                domain = np.linspace(start, n_epochs, len(means))
             except TypeError as e:
                 if errors == "raise":
                     raise e
                 if errors == "ignore":
                     continue
                 if errors == "flag":
-                    print("Error with", info_type, "-", e)
+                    print("Error with", model_name, info_type, "-", e)
                     continue
-            plt.subplot(1, info_length, i+1)
+            plt.subplot(rows, cols, i+1)
             plt.plot(domain, means, label=model_name, marker='o', color=colors[j])
             plt.fill_between(domain, means - stds, means + stds, alpha=0.2, color=colors[j])
-            plt.xlabel("Data Size")
+            plt.xlabel("Epoch")
             plt.ylabel(info_ylabels[i])
             if "acc" in info_type:
                 plt.axhline(y=1, color='k', linestyle='--')
             if "time" in info_type:
                 plt.yscale('log')
-            plt.title(info_type)
+            plt.title(subtitle)
             plt.legend()
     plt.suptitle(f"Model Benchmarking on '{dataset_name}'")
     plt.tight_layout()
+    loop.close()
 
     # save and show the figure
     if save_fig:
+        if verbose > 0:
+            print("Saving your figure...")
         fig_path = f"results/{dataset_name}/charts/"
         fig_name = f"benchmarking_{datetime}.png"
         if not os.path.exists(fig_path):
