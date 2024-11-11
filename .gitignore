@@ -1,6 +1,8 @@
 __pycache__/
 .vscode/
 .idea/
+apis/
+wandb/
 BenchmarkTests/data/
 BenchmarkTests/results/
 BenchmarkTests/__pycache__/

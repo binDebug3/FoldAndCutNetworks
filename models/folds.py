@@ -12,13 +12,16 @@ class Fold(nn.Module):
     """
     A PyTorch module that performs a folding operation on input tensors along a specified direction.
     """
-    def __init__(self, width:int, leak:float=0, fold_in:bool=True, has_stretch:bool=False) -> None:
+    def __init__(self, width:int, leak:float=0, 
+                 fold_in:bool=True, has_stretch:bool=False, track_importance:bool=False) -> None:
         """
         Thus function initializes the Fold module.
         Parameters:
             width (int): The expected input dimension.
-            crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
+            leak (float, optional): The leak parameter for the fold operation.
+            fold_in (bool): Whether to fold in or fold out.
             has_stretch (bool): Whether the module allows stretching.
+            track_importance (bool): Whether to track how important the fold is.
         """
         super().__init__()
         # Hyperparameters
@@ -26,6 +29,7 @@ class Fold(nn.Module):
         self.leak = leak
         self.fold_in = fold_in
         self.has_stretch = has_stretch
+        self.importance = 0
         
         # Parameters
         min_norm = 1e-2
@@ -65,6 +69,8 @@ class Fold(nn.Module):
             indicator = (scales > 1).float()
         else:
             indicator = (scales < 1).float()
+        if self.track_importance:
+            self.importance = indicator.mean().item()
         indicator = indicator + (1 - indicator) * self.leak
 
         # Compute the projected and folded values

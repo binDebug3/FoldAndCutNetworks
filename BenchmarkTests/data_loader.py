@@ -280,13 +280,14 @@ def load_fashion(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
     return X_train, X_test, y_train, y_test
     
 
-def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2, verbose:int=0) -> tuple:
+def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2, errors="ignore", verbose:int=0) -> tuple:
     """
     This function loads the imagenet dataset from torchvision.
     Parameters:
         astorch (bool): default=False. If True, load the data as torch tensors.
         random_state (int): default=None. The random state to use when splitting the data.
         test_size (float): default=0.2. The proportion of the data to use as the test set.
+        errors (str): default="ignore". How to handle errors when loading the data.
         verbose (int): default=0. If 1, print the shape of the data and the target.
     Returns:
         X_train (np.ndarray): The training data.
@@ -294,7 +295,11 @@ def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2
         y_train (np.ndarray): The training target.
         y_test (np.ndarray): The testing target.
     """
-    raise NotImplementedError("This function is not implemented yet.")
+    if errors == "raise":
+        raise NotImplementedError("This function is not implemented yet.")
+    if errors == "flag":
+        print("Load_imagenet is not implemented yet.")
+    return None, None, None, None
 
 
 
@@ -315,7 +320,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     with open("config.json", "r") as f:
         settings = json.load(f)
     all_benchmark_models = settings["all_benchmark_models"]
-    all_benchmark_datasets = settings["all_benchmark_datasets"]
+    benchmark_datasets = settings["benchmark_datasets"]
     ratio_list = settings["default_ratio_list"]
     rs = settings["random_state"]
     test_size = settings["test_size"]
@@ -328,7 +333,6 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     assert model_name in all_benchmark_models, f"model_name '{model_name}' must be one of {all_benchmark_models}"
     if dataset_name is not None:
         assert type(dataset_name) == str, "dataset must be a string"
-        assert dataset_name in all_benchmark_datasets, f"dataset '{dataset_name}' must be one of {all_benchmark_datasets}"
         datasets = [dataset_name]
     else:
         datasets = benchmark_datasets
@@ -344,7 +348,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
             print(f"\nTesting {model_name} on {dataset}")
         
         # load data
-        data_loader = config[dataset]
+        data_loader = config.get(dataset, load_pmlb_dataset)
         X_train, X_test, y_train, y_test = data_loader(random_state=rs, 
                                                        test_size=test_size, 
                                                        astorch=astorch, 

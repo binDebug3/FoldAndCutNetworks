@@ -8,3 +8,4 @@ metric-learn
 jeffutils
 kaleido
 plotly
+wandb
