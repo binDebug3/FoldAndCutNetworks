@@ -119,7 +119,8 @@ def train(model, optimizer:torch.optim.Optimizer,
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
-          validate_rate:float=0, verbose:int=0, lr_schedule=None):
+          validate_rate:float=0, lr_schedule=None,
+          early_stopping_tol:float=0., verbose:int=0):
     """
     This function trains the neural network.
     Parameters:
@@ -129,8 +130,11 @@ def train(model, optimizer:torch.optim.Optimizer,
         val_dataloader (DataLoader) - The DataLoader object for the validation set
         epochs (int) - The number of epochs to train the model (default: 100)
         DEVICE (torch.device) - The device to run the calculations on
-        lr_scheduler (LRSchedulerWrapper) - The learning rate scheduler (default: None)
         validate_rate (float) - The rate at which to validate the model (default: 0)
+            e.g. 0.05 when epochs=100 will validate every 5 epochs
+        lr_scheduler (LRSchedulerWrapper) - The learning rate scheduler (default: None)
+        early_stopping_tol (float) - The tolerance for early stopping (default: 0)
+            0 means no early stopping
         verbose (int) - The verbosity level (default: 0)
     Returns:
         train_losses (list) - The training losses for each epoch
@@ -191,11 +195,13 @@ def train(model, optimizer:torch.optim.Optimizer,
         train_accuracies.append(correct_preds / total_preds)
         
         # Calculate the validation loss and accuracy
-        if val_separation > 0 and (i+1)% val_separation == 0:
+        if val_separation > 0 and (i+1) % val_separation == 0:
             val_loss, val_accuracy = validate(model, val_dataloader, DEVICE)
-
+            stop_count = 3
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
+            if len(val_accuracies) > stop_count and np.allclose(np.array(val_accuracies[-stop_count:]), val_accuracy, atol=early_stopping_tol):
+                break
     
     # Close the loop and return the losses and accuracies
     loop.close()
