@@ -16,32 +16,40 @@ class DynamicOrigami(nn.Module):
             [{'type': 'Fold', 'params': {'width': (int), 'leak': (float), 'fold_in':(bool), 'has_stretch': (bool)}},
             {'type': 'SoftFold', 'params': {'width': (int), 'crease': (float), 'has_stretch': (bool)}},
             {'type': 'Linear', 'params': {'in_features': (int), 'out_features': (int)}}]
+            control: [(int)]
             """
         self.architecture = architecture
         self.num_classes = num_classes
         self.layers = nn.ModuleList()
         
-        # Try to create the architecture by looping through the layers
-        try: 
-            for layer in self.architecture:
-                type = layer['type']
-                params = layer['params']
-                if type == 'Fold':
-                    self.layers.append(Fold(**params))
-                elif type == 'SoftFold':
-                    self.layers.append(SoftFold(**params))
-                elif type == 'Linear':
-                    self.layers.append(nn.Linear(**params))
-                    self.layers.append(nn.ReLU())
-            
-            # Get the width of the penultimate layer and add a linear layer to the output
-            penultimate_layer = self.architecture[-1]
-            if penultimate_layer['type'] == 'Linear':
-                in_features = penultimate_layer['params']['out_features']
-                print("Warning: A linear 'cut' layer is already automatically added to the forward pass")
-            else:
-                in_features = penultimate_layer['params']['width']
+        # Try to create the architecture by looping through the layers if its a dictionary
+        try:
+            if type(self.architecture[0]) == dict:
+                for layer in self.architecture:
+                    layer_type = layer['type']
+                    params = layer['params']
+                    if layer_type == 'Fold':
+                        self.layers.append(Fold(**params))
+                    elif layer_type == 'SoftFold':
+                        self.layers.append(SoftFold(**params))
+                    elif layer_type == 'Linear':
+                        self.layers.append(nn.Linear(**params))
+                        self.layers.append(nn.ReLU())
                 
+                # Get the width of the penultimate layer and add a linear layer to the output
+                penultimate_layer = self.architecture[-1]
+                if penultimate_layer['type'] == 'Linear':
+                    in_features = penultimate_layer['params']['out_features']
+                    print("Warning: A linear 'cut' layer is already automatically added to the forward pass")
+                else:
+                    in_features = penultimate_layer['params']['width']
+
+            # Handle the control case
+            elif type(self.architecture[0]) == int:
+                in_features = self.architecture[0]
+            else:
+                raise KeyError
+            
             # Define the cut layer and append it to the layers
             cut = nn.Linear(in_features, self.num_classes)
             self.layers.append(cut)
