@@ -201,6 +201,8 @@ def train(model, optimizer:torch.optim.Optimizer,
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
             if len(val_accuracies) > stop_count and np.allclose(np.array(val_accuracies[-stop_count:]), val_accuracy, atol=early_stopping_tol):
+                if verbose > 0:
+                    print(f"Early stopping at epoch {i+1}")
                 break
     
     # Close the loop and return the losses and accuracies

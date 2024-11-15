@@ -29,6 +29,7 @@ class Fold(nn.Module):
         self.leak = leak
         self.fold_in = fold_in
         self.has_stretch = has_stretch
+        self.track_importance = track_importance
         self.importance = 0
         
         # Parameters

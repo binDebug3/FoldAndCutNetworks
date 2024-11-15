@@ -3,6 +3,7 @@ __pycache__/
 .idea/
 apis/
 wandb/
+data/
 BenchmarkTests/data/
 BenchmarkTests/results/
 BenchmarkTests/__pycache__/

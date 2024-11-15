@@ -3,12 +3,14 @@ import os
 import time
 import json
 import datetime as dt
-import itertools
 import math
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
-from jeffutils.utils import stack_trace             # type: ignore
-
+import pdb
+try:
+    from jeffutils.utils import stack_trace         # type: ignore
+except ImportError:
+    pass
 
 # plotting imports
 import matplotlib.pyplot as plt                     # type: ignore
@@ -20,15 +22,23 @@ from sklearn.metrics import accuracy_score          # type: ignore
 from sklearn.ensemble import RandomForestClassifier # type: ignore
 from sklearn.neighbors import KNeighborsClassifier  # type: ignore
 from metric_learn import LMNN                       # type: ignore
+from sklearn.utils import shuffle                   # type: ignore
 
 #deep learning imports
-from cnn_bench import CNNModel
+try:
+    from cnn_bench import CNNModel
+except ImportError:
+    from BenchmarkTests.cnn_bench import CNNModel
 
 # our model imports
 sys.path.append('../')
 from models.model_bank import *
 from models.training import *
-config_path = "config.json"
+
+onsup = 'SLURM_JOB_ID' in os.environ
+config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
+architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+
 
 
 
@@ -77,7 +87,10 @@ def build_dir(dataset_name:str, model_name:str):
     Returns:
         str: directory
     """
-    return f"results/{dataset_name}/{model_name}/npy_files"
+    path = f"results/{dataset_name}/{model_name}/npy_files"
+    if onsup:
+        path = f"../{path}"
+    return path
 
 
 
@@ -117,7 +130,10 @@ def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:
     except Exception as e:
         if verbose:
             print("Error: file not found")
-            print(stack_trace(e))
+            try:
+                print(stack_trace(e))
+            except NameError:
+                print(e)
         return None
     
 
@@ -274,12 +290,15 @@ def get_model(model_name:str, input_size:int=0, lmnn_default_neighbors:int=3) ->
     Returns:
         model: The model to train
     """
+    with open(architecture_path) as f:
+        architectures = json.load(f)
     mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
             LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else \
             OrigamiFold4(input_size) if model_name == "dl_fold" else \
             OrigamiSoft4(input_size) if model_name == "dl_softfold" else \
-            CNNModel(input_channels= input_size) if model_name == "dl_cnn" else None
+            CNNModel(input_channels= input_size) if model_name == "dl_cnn" else \
+            DynamicOrigami(architecture=architectures.get(model_name), num_classes=10) if model_name in architectures.keys() else None
             
     if mdl is None:
         raise InvalidModelError(f"Invalid model name. Must be 'randomforest', 'knn', 'dl_cnn', 'dl_fold', 'dl_softfold' or 'metric' not '{model_name}'.")
@@ -357,12 +376,16 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
         x_test (np.ndarray): testing data
         y_test (np.ndarray): testing labels
         n_epochs (int): number of epochs to train the model
-        return_training (bool): whether to return the training data
+        return_training (bool): whether to return the meta data from train time
         verbose (int): The verbosity level
     Returns:
-        np.ndarray: predictions on the test set
-        np.ndarray: predictions on the training set
-        float: average training time
+        train_losses (list): training losses for each epoch
+        val_losses (list): validation losses for each validation epoch
+        train_accuracies (list): training accuracies for each epoch
+        val_accuracies (list): validation accuracies for each validation epoch
+        train_time (float): average training time
+        inference_speed (float): average inference speed
+        num_parameters (int): number of parameters in the model
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loader = load_data(x_train, y_train)
@@ -372,6 +395,17 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
                                                                        validate_rate=0.05, epochs=n_epochs, verbose=verbose)
     end_time = time.perf_counter()
     
+    # calculate inference speed
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    start_inference = time.perf_counter()
+    with torch.no_grad():
+        y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
+    end_inference = time.perf_counter()
+    inference_speed = (end_inference - start_inference) / len(y_test)
+    
+    # get parameter count
+    num_parameters = sum(p.numel() for p in model.parameters())
+    
     if not return_training:
         model.eval()
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -380,9 +414,10 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
             y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
         y_pred_trains = torch.cat(y_pred_trains).cpu().numpy()
         y_preds = torch.cat(y_preds).cpu().numpy()  
-        return y_preds, y_pred_trains, end_time - start_time
+        return y_preds, y_pred_trains, end_time - start_time, inference_speed, num_parameters
     
-    return train_losses, val_losses, train_accuracies, val_accuracies, end_time - start_time
+    return train_losses, val_losses, train_accuracies, val_accuracies, \
+            end_time - start_time, inference_speed, num_parameters
 
 
 def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
@@ -421,7 +456,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 
     
     for i in range(repeat):
-        # X_train, y_train = shuffle(X_train, y_train, random_state=i)
+        X_train, y_train = shuffle(X_train, y_train, random_state=i)
         # if len(np.unique(y_train)) < 2:
         #     raise ValueError("Not enough classes in the training data")
 
@@ -437,7 +472,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         # train the model and get performance results
         if model_name[:2] == "dl":
             model = get_model(model_name, input_size=X_train.shape[1])
-            train_losses, val_losses, train_accuracies, val_accuracies, train_time = \
+            train_losses, val_losses, train_accuracies, val_accuracies, train_time, inference_speed, num_parameters = \
                 run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, n_epochs=n_epochs, verbose=verbose)
         else:
             model = get_model(model_name, lmnn_default_neighbors=lmnndn)
@@ -450,26 +485,36 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
             val_accuracies = [acc_test]*val_length
             train_losses = [0]*val_length
             val_losses = [0]*val_length
+            inference_speed = 0
+            num_parameters = 0
 
 
         # Done evaluating, now saving data
-        train_acc = np.array(train_accuracies)
-        val_acc = np.array(val_accuracies)
-        train_loss = np.array(train_losses)
-        val_loss = np.array(val_losses)
-        time_list = np.array(train_time)
+        metric_list = [np.array(train_accuracies), 
+                       np.array(val_accuracies), 
+                       np.array(train_losses), 
+                       np.array(val_losses), 
+                       np.array(train_time), 
+                       np.array(inference_speed), 
+                       np.array(num_parameters)]
         if save_all:
-            for j, data, info_type in zip(range(len(info_list)), info_list, info_titles):
+            # check if the lengths match
+            if len(metric_list) != len(info_list) or len(metric_list) != len(info_titles):
+                print("Error: metric list length does not match info list length")
+                print(f"metric_list: {len(metric_list)}. info_list: {len(info_list)}. info_titles: {len(info_titles)}")
+                if os.isatty(0):
+                    pdb.set_trace() 
+            # save each metric for each iteration
+            for j, data, info_type in zip(range(len(metric_list)), metric_list, info_titles):
                 save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh, repeat=repeat)
-        results_dict[model_name][i] = {"train_loss": train_loss, "val_loss": val_loss,
-                                        "train_acc": train_acc, "val_acc": val_acc,
-                                        "time_list": time_list}
+        results_dict[model_name][i] = {name: value for name, value in zip(info_list, metric_list)}
 
 
     # Done benchmarking, calculate means and stds and saving them
     results_mean = {}
     results_std = {}
     for info in info_list:
+        # compute means and stds of the data for each metric
         values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
         results_mean[info] = np.mean(values, axis=0)
         results_std[info] = np.std(values, axis=0)
@@ -478,16 +523,22 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     if not save_any:
         data_list, val_list, type_list, name_list = [], [], [], []
         for info in info_list:
+            # datalist contains the mean and std for each metric
             data_list.extend([results_mean[info], results_std[info]])
             is_validation = "val" in info
+            # val_list contains whether the data is validation data
             val_list.extend([is_validation, is_validation])
             metric_type = "acc" if "acc" in info else "val" if "val" in info else "time"
+            # type_list contains the type of metric (accuracy, validation, or time)
             type_list.extend([metric_type] * 2)
+            # name_list contains the name of the metric (mean or std)
             name_list.extend(["mean", "std"])
 
+        # save the data
         for data, info_type, name, val in zip(data_list, type_list, name_list, val_list):
             save_data(data, save_constants, info_type, name, val=val, refresh=refresh, repeat=repeat)
 
+    # update the results dictionary with the means and stds
     results_dict[model_name]["mean"] = {info: results_mean[info] for info in info_list}
     results_dict[model_name]["std"] = {info: results_std[info] for info in info_list}
     return results_dict

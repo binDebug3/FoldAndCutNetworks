@@ -19,8 +19,10 @@ ZIP_NAME="code_archive.zip.tar.gz"
 echo "{\"date\": \"$(date)\", \"netid\": \"$NETID\"}" > commits.json
 
 # Find all .py and .json files, preserving their folder structure, and zip them into an archive
-echo "Creating zip archive from 'py', 'json', and 'txt' files..."
-find . -type f \( -name "*.py" -o -name "*.json" -o -name "*.txt" \) | tar -czf "$ZIP_NAME" -T -
+echo "Creating zip archive from 'py', and 'json' files..."
+# find . -type f \( -name "*.py" -o -name "*.json" -o -name "*.txt" \) | tar -czf "$ZIP_NAME" -T -
+find . \( -path "./wandb" -o -path "./apis" \) -prune -o -type f \( -name "*.py" -o -name "*.json"\) -print | tar -czf "$ZIP_NAME" -T -
+
 
 # Check if the zip command was successful
 if [ $? -ne 0 ]; then

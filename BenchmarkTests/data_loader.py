@@ -1,5 +1,6 @@
 # fundamentals
 import sys
+import os
 import warnings
 import json
 import pickle
@@ -10,7 +11,7 @@ import pandas as pd     # type: ignore
 # datasets
 from sklearn.datasets import load_breast_cancer, load_digits# type: ignore
 from torchvision import datasets    # type: ignore
-from pmlb import fetch_data
+from pmlb import fetch_data         # type: ignore
 
 # models
 import torch    # type: ignore
@@ -19,8 +20,17 @@ from sklearn.model_selection import train_test_split        # type: ignore
 from sklearn.preprocessing import StandardScaler            # type: ignore
 
 # our files
-from experimenter import *
-import cnn_bench
+try:
+    from experimenter import *
+    import cnn_bench
+except ImportError:
+    from BenchmarkTests.experimenter import *
+    from BenchmarkTests import cnn_bench
+
+print("\nWorking Directory:", os.getcwd(), "\n")
+onsup = 'SLURM_JOB_ID' in os.environ
+config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
+architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
 
 
 
@@ -317,12 +327,15 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
         model_results (dict): The results of the benchmark.
     """
     # validate inputs
-    with open("config.json", "r") as f:
+    with open(config_path, "r") as f:
         settings = json.load(f)
+    with open(architecture_path, "r") as f:
+        architectures = json.load(f)
     all_benchmark_models = settings["all_benchmark_models"]
     benchmark_datasets = settings["benchmark_datasets"]
     ratio_list = settings["default_ratio_list"]
     rs = settings["random_state"]
+    rs = None if rs == 0 else rs
     test_size = settings["test_size"]
     config = {"cifar10": load_cifar10,
             "fashionMNIST": load_fashion,
@@ -330,7 +343,8 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
             "cancer": load_cancer,
             "imagenet": load_imagenet}
     
-    assert model_name in all_benchmark_models, f"model_name '{model_name}' must be one of {all_benchmark_models}"
+    assert model_name in all_benchmark_models or model_name in list(architectures.keys()), \
+        f"model_name '{model_name}' must be one of {all_benchmark_models} or in '{architecture_path}'"
     if dataset_name is not None:
         assert type(dataset_name) == str, "dataset must be a string"
         datasets = [dataset_name]
