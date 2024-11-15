@@ -10,6 +10,12 @@ from models.folds import Fold, SoftFold
 #################################### Dynamic Origami Model ####################################
 class DynamicOrigami(nn.Module):
     def __init__(self, architecture, num_classes):
+        """
+        This function initializes the Dynamic Origami model
+        Parameters:
+            architecture: (list) - A list of dictionaries that define the architecture of the model
+            num_classes: (int) - The number of classes in the dataset
+        """
         super().__init__()
         # Define the architecture
         self.architecture_example = """
