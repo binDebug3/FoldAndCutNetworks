@@ -4,20 +4,25 @@ import os
 import warnings
 import json
 import pickle
+import gzip
 import datetime as dt
 import numpy as np      # type: ignore
 import pandas as pd     # type: ignore
 
 # datasets
 from sklearn.datasets import load_breast_cancer, load_digits# type: ignore
-from torchvision import datasets    # type: ignore
-from pmlb import fetch_data         # type: ignore
+from torchvision import datasets                            # type: ignore
+from pmlb import fetch_data                                 # type: ignore
+from ucimlrepo import fetch_ucirepo                         # type: ignore
+from urllib.request import urlretrieve                      # type: ignore
+import tarfile
 
 # models
 import torch    # type: ignore
 from torchvision.transforms import ToTensor                 # type: ignore
 from sklearn.model_selection import train_test_split        # type: ignore
 from sklearn.preprocessing import StandardScaler            # type: ignore
+from torchvision import datasets, transforms               # type: ignore
 
 # our files
 try:
@@ -31,6 +36,7 @@ print("\nWorking Directory:", os.getcwd(), "\n")
 onsup = 'SLURM_JOB_ID' in os.environ
 config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
 architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+data_path = "../data" if onsup else "../data"
 
 
 
@@ -102,7 +108,27 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         y_train (np.ndarray): The training target.
         y_test (np.ndarray): The testing target.
     """
-    batch1 = unpickle('data/cifar-10-batches-py/data_batch_1')
+
+
+    cifar10_dir = os.path.join(data_path, "cifar-10-batches-py")
+
+    # Check if CIFAR-10 data exists locally
+
+    ### currently downloading cifar10 doesn't work ###
+    if not os.path.exists(cifar10_dir):
+        # Data not found, download it
+        if verbose > 0:
+            print("CIFAR-10 data not found locally. Downloading...")
+        # Define the transformation to convert images to tensors
+        transform = transforms.Compose([transforms.ToTensor()])
+
+        # Download CIFAR-10 dataset
+        train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
+        test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
+
+    print("CIFAR-10 dataset downloaded and extracted.")
+
+    batch1 = unpickle(data_path + '/cifar-10-batches-py/data_batch_1')
     X = batch1[b'data']
     y = np.array(batch1[b'labels'])
 
@@ -115,7 +141,7 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
                                                             random_state=random_state, shuffle=shuffle)
         # make sure there are at least lmnn_default_params of each class in the training set
-        if not shuffle or all([sum(y_train[:first_size] == uclass) >= lmnn_default_neighbors for uclass in set(y_train)]):
+        if not shuffle or all([sum(y_train[:first_size] == uclass) >= 5 for uclass in set(y_train)]):
             break
         count += 1
         if verbose > 1:
@@ -133,6 +159,87 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         y_test = torch.tensor(y_test)
     return X_train, X_test, y_train, y_test
 
+def load_higgs(astorch=False, shuffle=True, random_state=None, test_size=0.2, verbose=0):
+    """
+    Loads the HIGGS dataset from 'HIGGS.csv' file.
+    """
+    import os
+
+    # Path to HIGGS data
+    higgs_path = os.path.join(data_path, "HIGGS.csv")
+
+    # Check if the data file exists
+    if not os.path.exists(higgs_path):
+        # Data not found, download it
+        if verbose > 0:
+            print("HIGGS data not found locally. Downloading...")
+        higgs_url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/00280/HIGGS.csv.gz'
+        gzip_path = os.path.join(data_path, 'HIGGS.csv.gz')
+        urlretrieve(higgs_url, gzip_path)
+        # Unzip the file
+        
+        with gzip.open(gzip_path, 'rb') as f_in:
+            with open(higgs_path, 'wb') as f_out:
+                f_out.write(f_in.read())
+        os.remove(gzip_path)  # Remove the gz file after extraction
+
+    # Load the data
+    data = pd.read_csv(higgs_path, header=None)
+    X = data.iloc[:, 1:].values  # Features start from second column
+    y = data.iloc[:, 0].values   # Labels are in the first column
+
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size,
+                                                        random_state=random_state, shuffle=shuffle)
+    if verbose > 0:
+        print("\tX shape:", X_train.shape)
+        print("\ty shape:", y_train.shape)
+
+    if astorch:
+        X_train = torch.tensor(X_train, dtype=torch.float32)
+        X_test = torch.tensor(X_test, dtype=torch.float32)
+        y_train = torch.tensor(y_train)
+        y_test = torch.tensor(y_test)
+
+    return X_train, X_test, y_train, y_test
+
+
+def load_covertype(astorch=False, shuffle=True, random_state=None, test_size=0.2, verbose=0):
+    """
+    Loads the Covertype dataset from 'covtype.data' file.
+    """
+
+    # Path to Covertype data
+    covtype_path = os.path.join(data_path, "covtype.data")
+
+    # Check if the data file exists
+    if not os.path.exists(covtype_path):
+        # Data not found, download it
+        if verbose > 0:
+            print("Covertype data not found locally. Downloading...")
+        covertype = fetch_ucirepo(id=31) 
+        X = covertype.data.features 
+        y = covertype.data.targets 
+
+    else:
+        data = pd.read_csv(covtype_path, header=None)
+        X = data.iloc[:, :-1].values
+        y = data.iloc[:, -1].values
+
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size,
+                                                        random_state=random_state, shuffle=shuffle)
+    if verbose > 0:
+        print("\tX shape:", X_train.shape)
+        print("\ty shape:", y_train.shape)
+    
+    if astorch:
+        X_train = torch.tensor(X_train, dtype=torch.float32)
+        X_test = torch.tensor(X_test, dtype=torch.float32)
+        y_train = torch.tensor(y_train)
+        y_test = torch.tensor(y_test)
+
+    return X_train, X_test, y_train, y_test
 
 
 def load_cancer(astorch:bool=False, shuffle:bool=True, random_state:int=None, test_size:float=0.2, verbose:int=0) -> tuple:
@@ -205,11 +312,36 @@ def load_digits_data(astorch:bool=False, shuffle:bool=True, random_state:int=Non
         y_test (np.ndarray): The testing target.
     """
     # digits_X, digits_y = load_digits(return_X_y=True)
-    digits = load_digits()
-    digits_X = digits.data
-    digits_y = digits.target
-    X_train, X_test, y_train, y_test = train_test_split(digits_X, digits_y, test_size=test_size, 
-                                                        random_state=random_state, shuffle=shuffle)
+
+    train_path = os.path.join(data_path, "mnist_train.csv")
+    test_path = os.path.join(data_path, "mnist_test.csv")
+
+    if not os.path.exists(train_path) or not os.path.exists(test_path):
+        # Data not found, download it
+        if verbose > 0:
+            print("MNIST data not found locally. Downloading...")
+        digits = load_digits()
+        digits_X = digits.data
+        digits_y = digits.target
+        X_train, X_test, y_train, y_test = train_test_split(digits_X, digits_y, test_size=test_size, 
+                                                            random_state=random_state, shuffle=shuffle)
+    else:
+        train_data = pd.read_csv(train_path, header=0, index_col = 0)
+        test_data = pd.read_csv(test_path, header=0, index_col = 0)
+
+        X_train = train_data.values
+        y_train = train_data.index.values
+
+        X_test = test_data.values
+        y_test = test_data.index.values
+
+        if shuffle:
+            random_idx = np.random.permutation(len(X_train))
+            X_train = X_train[random_idx]
+            y_train = y_train[random_idx]
+            random_idx = np.random.permutation(len(X_test))
+            X_test = X_test[random_idx]
+            y_test = y_test[random_idx]
 
     if verbose > 0:
         print("\tX shape: ", X_train.shape)
@@ -220,6 +352,7 @@ def load_digits_data(astorch:bool=False, shuffle:bool=True, random_state:int=Non
         X_test = torch.tensor(X_test)
         y_train = torch.tensor(y_train)
         y_test = torch.tensor(y_test)
+
     return X_train, X_test, y_train, y_test
     
 
@@ -242,29 +375,48 @@ def load_fashion(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         warnings.warn("random_state is not implemented for this dataset, ignoring the provided value.")
     if test_size != 0.2:
         warnings.warn("test_size is not implemented for this dataset, ignoring the provided value.")
-    
-    training_data = datasets.FashionMNIST(
-        root="data",
-        train=True,
-        download=True,
-        transform=ToTensor()
-    )
 
-    test_data = datasets.FashionMNIST(
-        root="data",
-        train=False,
-        download=True,
-        transform=ToTensor()
-    )
-    
-    # Extract data and labels from the training set
-    X_train = training_data.data.numpy()
-    y_train = training_data.targets.numpy()
+    # Paths to Fashion MNIST data
+    train_path = os.path.join(data_path, "fashion-mnist_train.csv")
+    test_path = os.path.join(data_path, "fashion-mnist_test.csv")
 
-    # Extract data and labels from the test set
-    X_test = test_data.data.numpy()
-    y_test = test_data.targets.numpy()
+    if not os.path.exists(train_path) or not os.path.exists(test_path):
+        # Data not found, download it
+        if verbose > 0:
+            print("Fashion MNIST data not found locally. Downloading...")
     
+        training_data = datasets.FashionMNIST(
+            root="data",
+            train=True,
+            download=True,
+            transform=ToTensor()
+        )
+
+        test_data = datasets.FashionMNIST(
+            root="data",
+            train=False,
+            download=True,
+            transform=ToTensor()
+        )
+
+        # Extract data and labels from the training set
+        X_train = training_data.data.numpy()
+        y_train = training_data.targets.numpy()
+
+        # Extract data and labels from the test set
+        X_test = test_data.data.numpy()
+        y_test = test_data.targets.numpy()
+
+    else:
+       train_data = pd.read_csv(train_path, header=0, index_col=0)
+       test_data = pd.read_csv(test_path, header=0, index_col=0)
+
+       X_train = train_data.values
+       y_train = train_data.index.values
+
+       X_test = test_data.values
+       y_test = test_data.index.values
+
     # shuffle data
     if shuffle:
         random_idx = np.random.permutation(len(X_train))
@@ -385,3 +537,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     if return_sizes:
         return results, sample_size_list
     return results
+
+
+if __name__ == "__main__":
+    load_cifar10(verbose=1)
