@@ -4,6 +4,7 @@ import time
 import json
 import datetime as dt
 import math
+import gzip
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
 import pdb
@@ -38,7 +39,7 @@ from models.training import *
 onsup = 'SLURM_JOB_ID' in os.environ
 config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
 architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
-
+data_path = "../data" if onsup else "../data"
 
 
 
@@ -270,8 +271,24 @@ def delete_data(dataset_name:list=None, model_name:list=None,
         print(f"Retained {retained} files")
         
             
-            
-            
+def read_idx(filepath):
+    """
+    Reads IDX format files (for MNIST and Fashion-MNIST datasets).
+    """
+    with gzip.open(filepath, 'rb') if filepath.endswith(".gz") else open(filepath, 'rb') as f:
+        # Read the magic number and dimensions
+        magic_number = int.from_bytes(f.read(4), byteorder='big')
+        num_items = int.from_bytes(f.read(4), byteorder='big')
+        if magic_number == 2049:  # Labels
+            data = np.frombuffer(f.read(), dtype=np.uint8)
+            return data
+        elif magic_number == 2051:  # Images
+            rows = int.from_bytes(f.read(4), byteorder='big')
+            cols = int.from_bytes(f.read(4), byteorder='big')
+            data = np.frombuffer(f.read(), dtype=np.uint8).reshape(num_items, rows * cols)
+            return data
+        else:
+            raise ValueError(f"Unsupported magic number: {magic_number}")        
 
 
 
