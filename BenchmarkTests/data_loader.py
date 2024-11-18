@@ -1,5 +1,6 @@
 # fundamentals
 import sys
+import ssl
 import os
 import warnings
 import json
@@ -11,18 +12,18 @@ import pandas as pd     # type: ignore
 
 # datasets
 from sklearn.datasets import load_breast_cancer, load_digits# type: ignore
-from torchvision import datasets                            # type: ignore
+from torchvision import datasets, transforms                # type: ignore
 from pmlb import fetch_data                                 # type: ignore
 from ucimlrepo import fetch_ucirepo                         # type: ignore
 from urllib.request import urlretrieve                      # type: ignore
 import tarfile
+from sklearn.utils import shuffle as sk_shuffle
 
 # models
 import torch    # type: ignore
 from torchvision.transforms import ToTensor                 # type: ignore
 from sklearn.model_selection import train_test_split        # type: ignore
 from sklearn.preprocessing import StandardScaler            # type: ignore
-from torchvision import datasets, transforms               # type: ignore
 
 # our files
 try:
@@ -123,8 +124,9 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         transform = transforms.Compose([transforms.ToTensor()])
 
         # Download CIFAR-10 dataset
-        train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
-        test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
+        ssl._create_default_https_context = ssl._create_unverified_context
+        datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
+        datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
 
     print("CIFAR-10 dataset downloaded and extracted.")
 
@@ -141,7 +143,7 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
                                                             random_state=random_state, shuffle=shuffle)
         # make sure there are at least lmnn_default_params of each class in the training set
-        if not shuffle or all([sum(y_train[:first_size] == uclass) >= 5 for uclass in set(y_train)]):
+        if not shuffle or all([sum(y_train[:first_size] == uclass) >= lmnn_default_params for uclass in set(y_train)]):
             break
         count += 1
         if verbose > 1:
@@ -175,6 +177,8 @@ def load_higgs(astorch=False, shuffle=True, random_state=None, test_size=0.2, ve
             print("HIGGS data not found locally. Downloading...")
         higgs_url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/00280/HIGGS.csv.gz'
         gzip_path = os.path.join(data_path, 'HIGGS.csv.gz')
+
+        ssl._create_default_https_context = ssl._create_unverified_context
         urlretrieve(higgs_url, gzip_path)
         # Unzip the file
         
@@ -217,6 +221,7 @@ def load_covertype(astorch=False, shuffle=True, random_state=None, test_size=0.2
         # Data not found, download it
         if verbose > 0:
             print("Covertype data not found locally. Downloading...")
+        ssl._create_default_https_context = ssl._create_unverified_context
         covertype = fetch_ucirepo(id=31) 
         X = covertype.data.features 
         y = covertype.data.targets 
@@ -386,36 +391,54 @@ def load_fashion(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
             print("Fashion MNIST data not found locally. Downloading...")
     
         training_data = datasets.FashionMNIST(
-            root="data",
+            root=data_path,
             train=True,
             download=True,
             transform=ToTensor()
         )
 
         test_data = datasets.FashionMNIST(
-            root="data",
+            root=data_path,
             train=False,
             download=True,
             transform=ToTensor()
         )
 
-        # Extract data and labels from the training set
-        X_train = training_data.data.numpy()
-        y_train = training_data.targets.numpy()
 
-        # Extract data and labels from the test set
-        X_test = test_data.data.numpy()
-        y_test = test_data.targets.numpy()
+        # Paths to the downloaded files
+        train_images_path = data_path + "/FashionMNIST/raw/train-images-idx3-ubyte.gz"
+        train_labels_path = data_path + "/FashionMNIST/raw/train-labels-idx1-ubyte.gz"
+        test_images_path = data_path + "/FashionMNIST/raw/t10k-images-idx3-ubyte.gz"
+        test_labels_path = data_path + "/FashionMNIST/raw/t10k-labels-idx1-ubyte.gz"
+
+        # Read the data
+        train_images = read_idx(train_images_path)
+        train_labels = read_idx(train_labels_path)
+        test_images = read_idx(test_images_path)
+        test_labels = read_idx(test_labels_path)
+
+        train_data = pd.DataFrame(train_images)
+        train_data.insert(0, 'label', train_labels)  # Add labels as the first column
+
+        test_data = pd.DataFrame(test_images)
+        test_data.insert(0, 'label', test_labels)  # Add labels as the first column
+
+
+        train_csv_path = os.path.join(data_path, "fashion-mnist_train.csv")
+        test_csv_path = os.path.join(data_path, "fashion-mnist_test.csv")
+
+        train_data.to_csv(train_csv_path, header=0, index_col=0)
+        test_data.to_csv(test_csv_path, header=0, index_col=0)
 
     else:
        train_data = pd.read_csv(train_path, header=0, index_col=0)
        test_data = pd.read_csv(test_path, header=0, index_col=0)
 
-       X_train = train_data.values
-       y_train = train_data.index.values
+    X_train = train_data.values
+    y_train = train_data.index.values
 
-       X_test = test_data.values
-       y_test = test_data.index.values
+    X_test = test_data.values
+    y_test = test_data.index.values
 
     # shuffle data
     if shuffle:
@@ -493,6 +516,8 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
             "fashionMNIST": load_fashion,
             "digits": load_digits_data,
             "cancer": load_cancer,
+            "HIGGS": load_higgs,
+            "covertype": load_covertype,
             "imagenet": load_imagenet}
     
     assert model_name in all_benchmark_models or model_name in list(architectures.keys()), \
@@ -540,4 +565,4 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
 
 
 if __name__ == "__main__":
-    load_cifar10(verbose=1)
+    load_digits_data(verbose=1)
