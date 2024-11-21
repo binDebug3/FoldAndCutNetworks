@@ -174,6 +174,8 @@ def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:in
             os.remove(last_file)
 
     path = f"results/{dataset_name}/{model_name}/npy_files/{partial_name}_d{datetime}.npy"
+    if onsup:
+        path = "../" + path
     np.save(path, data)
     return None
 
@@ -294,28 +296,58 @@ def read_idx(filepath):
 
 
 ### MODEL FUNCTIONS ###
+def update_architecture(data:list, input_size:int) -> dict:
+    """
+    Recursively update the values of keys named 'width', 'in_features', or 'out_features'
+    by multiplying them by input_size.
+    Parameters:
+        data (list): the model architecture as a list of layers
+        input_size (int): the number of input features in the data
+    Returns:
+        data (dict): the updated model architecture as a dictionary
+    """
+    # handle control case
+    if len(data) == 1 and isinstance(data[0], int):
+        return [input_size]
+
+    # recursively update widths and feature dimensions
+    for layer in data:
+        for param, value in layer["params"].items():
+            if param in {'width', 'in_features', 'out_features'}:
+                if isinstance(value, (int, float)):
+                    layer["params"][param] = int(value * input_size)
+        if layer["type"] == "Fold":
+            layer["params"]["leak"] = 0.
+    return data
 
 
-def get_model(model_name:str, input_size:int=0, lmnn_default_neighbors:int=3) -> object:
+def get_model(model_name:str, input_size:int=0, output_size:int=0, lmnn_default_neighbors:int=3) -> object:
     """
     Returns a new instance of the model based on the model name.
     Can be "randomforest", "knn", or "metric".
     Parameters:
         model_name (str): The name of the model to train.
-        input_size (int): The dimension of the input data
+        input_size (int): The dimension of the input data.
+        output_size (int): The dimension of the output data.
         lmnn_default_neighbors (int): The number of neighbors to use for the metric learning model
     Returns:
         model: The model to train
     """
     with open(architecture_path) as f:
         architectures = json.load(f)
-    mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
+    if model_name in architectures.keys():
+        meta_data = architectures.get(model_name, {})
+        arch = update_architecture(meta_data.get("structure", [1]), input_size=input_size)
+        lr = meta_data.get("learning_rate", 1e-3)
+        mdl = DynamicOrigami(architecture=arch, num_classes=output_size)
+        return mdl, lr
+    else:
+        mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
             LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else \
             OrigamiFold4(input_size) if model_name == "dl_fold" else \
             OrigamiSoft4(input_size) if model_name == "dl_softfold" else \
-            CNNModel(input_channels= input_size) if model_name == "dl_cnn" else \
-            DynamicOrigami(architecture=architectures.get(model_name), num_classes=10) if model_name in architectures.keys() else None
+            CNNModel(input_channels= input_size) if model_name == "dl_cnn" else None
             
     if mdl is None:
         raise InvalidModelError(f"Invalid model name. Must be 'randomforest', 'knn', 'dl_cnn', 'dl_fold', 'dl_softfold' or 'metric' not '{model_name}'.")
@@ -382,7 +414,8 @@ def run_standard(model, x_train:np.ndarray, y_train:np.ndarray, x_test:np.ndarra
 
 
 def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray, 
-                      x_test:np.ndarray, y_test:np.ndarray, n_epochs:int=200,
+                      x_test:np.ndarray, y_test:np.ndarray, 
+                      learning_rate:float=1e-3, n_epochs:int=200,
                       return_training:bool=True, verbose:int=0):
     """
     Train a deep learning model and predict on the test set
@@ -393,6 +426,7 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
         x_test (np.ndarray): testing data
         y_test (np.ndarray): testing labels
         n_epochs (int): number of epochs to train the model
+        learning_rate (float): the learning rate for the model
         return_training (bool): whether to return the meta data from train time
         verbose (int): The verbosity level
     Returns:
@@ -404,7 +438,7 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
         inference_speed (float): average inference speed
         num_parameters (int): number of parameters in the model
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     train_loader = load_data(x_train, y_train)
     val_loader = load_data(x_test, y_test)
     start_time = time.perf_counter()
@@ -485,12 +519,14 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         tmp_X_train, tmp_y_train = X_train[:size], y_train[:size]
         test_size = min(size, len(X_test)//2)
         tmp_X_test, tmp_y_test = X_test[:test_size], y_test[:test_size]
+        outs = len(np.unique(y_train))
         
         # train the model and get performance results
-        if model_name[:2] == "dl":
-            model = get_model(model_name, input_size=X_train.shape[1])
+        if "Fold" in model_name or "Control" == model_name:
+            model, lr = get_model(model_name, input_size=X_train.shape[1], output_size=outs)
             train_losses, val_losses, train_accuracies, val_accuracies, train_time, inference_speed, num_parameters = \
-                run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, n_epochs=n_epochs, verbose=verbose)
+                run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, 
+                                  n_epochs=n_epochs, learning_rate=lr, verbose=verbose)
         else:
             model = get_model(model_name, lmnn_default_neighbors=lmnndn)
             func = run_standard if model_name != "metric" else run_lmnn
