@@ -22,7 +22,7 @@ from plotly.subplots import make_subplots           # type: ignore
 from sklearn.metrics import accuracy_score          # type: ignore
 from sklearn.ensemble import RandomForestClassifier # type: ignore
 from sklearn.neighbors import KNeighborsClassifier  # type: ignore
-from metric_learn import LMNN                       # type: ignore
+#from metric_learn import LMNN                       # type: ignore
 from sklearn.utils import shuffle                   # type: ignore
 
 #deep learning imports
@@ -139,7 +139,7 @@ def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:
     
 
 
-def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
+def save_result_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
               val:bool=False, refresh:bool=False, repeat:int=5) -> None:
     """
     Save the data to a numpy file
