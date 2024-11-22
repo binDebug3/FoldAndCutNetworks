@@ -55,7 +55,7 @@ def load_pmlb_dataset(dataset_name:str, astorch:bool=False, shuffle:bool=True, r
     """
     This function loads a dataset from the PMLB library.
         Examples Datasets are:
-            "titanic", "sleep", "connect_4", "covertype", "mfeat_pixel", "dna"
+            "titanic", "sleep", "connect_4", "covtype", "mfeat_pixel", "dna"
             For more information on the datasets, see: https://epistasislab.github.io/pmlb/index.html
             This will show you the available datasets, their names, and if they're for classification or regression tasks
     Parameters:
@@ -109,12 +109,9 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         y_train (np.ndarray): The training target.
         y_test (np.ndarray): The testing target.
     """
-
-
     cifar10_dir = os.path.join(data_path, "cifar-10-batches-py")
 
     # Check if CIFAR-10 data exists locally
-
     ### currently downloading cifar10 doesn't work ###
     if not os.path.exists(cifar10_dir):
         # Data not found, download it
@@ -128,26 +125,18 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
 
-    print("CIFAR-10 dataset downloaded and extracted.")
+    if verbose > 1:
+        print("CIFAR-10 dataset downloaded and extracted.")
 
     batch1 = unpickle(data_path + '/cifar-10-batches-py/data_batch_1')
     X = batch1[b'data']
     y = np.array(batch1[b'labels'])
 
     # split data
-    first_size = 50
-    count = 0
     if shuffle and verbose > 1:
         print("\tShuffling:", end=" ")
-    while True:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
                                                             random_state=random_state, shuffle=shuffle)
-        # make sure there are at least lmnn_default_params of each class in the training set
-        if not shuffle or all([sum(y_train[:first_size] == uclass) >= lmnn_default_params for uclass in set(y_train)]):
-            break
-        count += 1
-        if verbose > 1:
-            print(count, end=", ")
     if verbose > 1:
         print(f"\n\tTrain set has {len(set(y_train))} classes and test set has {len(set(y_test))} classes")
     if verbose > 0:
@@ -160,6 +149,8 @@ def load_cifar10(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
         y_train = torch.tensor(y_train)
         y_test = torch.tensor(y_test)
     return X_train, X_test, y_train, y_test
+
+
 
 def load_higgs(astorch=False, shuffle=True, random_state=None, test_size=0.2, verbose=0):
     """
@@ -384,6 +375,8 @@ def load_fashion(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
     # Paths to Fashion MNIST data
     train_path = os.path.join(data_path, "fashion-mnist_train.csv")
     test_path = os.path.join(data_path, "fashion-mnist_test.csv")
+    print("\n*** Working directory", os.getcwd())
+    print("\n*** Test path:", test_path)
 
     if not os.path.exists(train_path) or not os.path.exists(test_path):
         # Data not found, download it
@@ -517,7 +510,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
             "digits": load_digits_data,
             "cancer": load_cancer,
             "HIGGS": load_higgs,
-            "covertype": load_covertype,
+            "covtype": load_covertype,
             "imagenet": load_imagenet}
     
     assert model_name in all_benchmark_models or model_name in list(architectures.keys()), \
@@ -536,14 +529,16 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
     sample_size_list = []
     for dataset in datasets:
         if verbose > 0:
-            print(f"\nTesting {model_name} on {dataset}")
+            print(f"\n\n|||||||\nTesting {model_name} on {dataset}")
         
         # load data
         data_loader = config.get(dataset, load_pmlb_dataset)
-        X_train, X_test, y_train, y_test = data_loader(random_state=rs, 
-                                                       test_size=test_size, 
-                                                       astorch=astorch, 
-                                                       verbose=verbose)
+        if data_loader == load_pmlb_dataset:
+            X_train, X_test, y_train, y_test = data_loader(dataset, random_state=rs, test_size=test_size, 
+                                                        astorch=astorch, verbose=verbose)
+        else:
+            X_train, X_test, y_train, y_test = data_loader(random_state=rs, test_size=test_size, 
+                                                        astorch=astorch, verbose=verbose)
         train_size = len(X_train)
         sample_sizes = [int(ratio*train_size) for ratio in ratio_list]
         sample_size_list.append(sample_sizes)

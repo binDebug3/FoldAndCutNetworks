@@ -54,14 +54,14 @@ class DynamicOrigami(nn.Module):
             elif type(self.architecture[0]) == int:
                 in_features = self.architecture[0]
             else:
-                raise KeyError
+                raise KeyError(f"Control case must have type(self.architecture[0]) = int not {type(self.architecture[0])} ({self.architecture[0]})")
             
             # Define the cut layer and append it to the layers
             cut = nn.Linear(in_features, self.num_classes)
             self.layers.append(cut)
             
         except:
-            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
+            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n not {self.architecture}")
             raise KeyError
         
         
