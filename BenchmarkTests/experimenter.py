@@ -139,7 +139,7 @@ def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:
     
 
 
-def save_result_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
+def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
               val:bool=False, refresh:bool=False, repeat:int=5) -> None:
     """
     Save the data to a numpy file
@@ -155,6 +155,7 @@ def save_result_data(data:np.ndarray, save_constants:tuple, info_type:str, itera
         refresh (bool): whether to refresh the last file
         repeat (int): number of times to repeat the experiment
     """
+    #test comment so I can push to github
     dataset_name, model_name, datetime = save_constants
     dir = build_dir(dataset_name, model_name)
     partial_name = build_name(val, info_type, iteration)
