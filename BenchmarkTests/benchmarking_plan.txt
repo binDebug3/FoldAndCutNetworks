@@ -4,6 +4,8 @@ Small digits (jeddy)
 Fashion (jeddy)
 ImageNet (hold off)
 Cancer (dallin)
+RL (nathaniel)
+minGPT (abe)
 Ignore
 MNIST
 CIFAR-100
