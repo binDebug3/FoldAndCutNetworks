@@ -139,7 +139,7 @@ def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:
     
 
 
-def save_result_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
+def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
               val:bool=False, refresh:bool=False, repeat:int=5) -> None:
     """
     Save the data to a numpy file
