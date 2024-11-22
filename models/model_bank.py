@@ -10,6 +10,12 @@ from models.folds import Fold, SoftFold
 #################################### Dynamic Origami Model ####################################
 class DynamicOrigami(nn.Module):
     def __init__(self, architecture, num_classes):
+        """
+        This function initializes the Dynamic Origami model
+        Parameters:
+            architecture: (list) - A list of dictionaries that define the architecture of the model
+            num_classes: (int) - The number of classes in the dataset
+        """
         super().__init__()
         # Define the architecture
         self.architecture_example = """
@@ -48,14 +54,14 @@ class DynamicOrigami(nn.Module):
             elif type(self.architecture[0]) == int:
                 in_features = self.architecture[0]
             else:
-                raise KeyError
+                raise KeyError(f"Control case must have type(self.architecture[0]) = int not {type(self.architecture[0])} ({self.architecture[0]})")
             
             # Define the cut layer and append it to the layers
             cut = nn.Linear(in_features, self.num_classes)
             self.layers.append(cut)
             
         except:
-            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n")
+            print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n not {self.architecture}")
             raise KeyError
         
         

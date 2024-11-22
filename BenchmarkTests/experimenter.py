@@ -3,12 +3,15 @@ import os
 import time
 import json
 import datetime as dt
-import itertools
 import math
+import gzip
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
-from jeffutils.utils import stack_trace             # type: ignore
-
+import pdb
+try:
+    from jeffutils.utils import stack_trace         # type: ignore
+except ImportError:
+    pass
 
 # plotting imports
 import matplotlib.pyplot as plt                     # type: ignore
@@ -19,16 +22,24 @@ from plotly.subplots import make_subplots           # type: ignore
 from sklearn.metrics import accuracy_score          # type: ignore
 from sklearn.ensemble import RandomForestClassifier # type: ignore
 from sklearn.neighbors import KNeighborsClassifier  # type: ignore
-from metric_learn import LMNN                       # type: ignore
+#from metric_learn import LMNN                       # type: ignore
+from sklearn.utils import shuffle                   # type: ignore
 
 #deep learning imports
-from cnn_bench import CNNModel
+try:
+    from cnn_bench import CNNModel
+except ImportError:
+    from BenchmarkTests.cnn_bench import CNNModel
 
 # our model imports
 sys.path.append('../')
 from models.model_bank import *
 from models.training import *
-config_path = "config.json"
+
+onsup = 'SLURM_JOB_ID' in os.environ
+config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
+architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+data_path = "../data" if onsup else "../data"
 
 
 
@@ -77,7 +88,10 @@ def build_dir(dataset_name:str, model_name:str):
     Returns:
         str: directory
     """
-    return f"results/{dataset_name}/{model_name}/npy_files"
+    path = f"results/{dataset_name}/{model_name}/npy_files"
+    if onsup:
+        path = f"../{path}"
+    return path
 
 
 
@@ -117,12 +131,15 @@ def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:
     except Exception as e:
         if verbose:
             print("Error: file not found")
-            print(stack_trace(e))
+            try:
+                print(stack_trace(e))
+            except NameError:
+                print(e)
         return None
     
 
 
-def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
+def save_result_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:int, 
               val:bool=False, refresh:bool=False, repeat:int=5) -> None:
     """
     Save the data to a numpy file
@@ -157,6 +174,8 @@ def save_data(data:np.ndarray, save_constants:tuple, info_type:str, iteration:in
             os.remove(last_file)
 
     path = f"results/{dataset_name}/{model_name}/npy_files/{partial_name}_d{datetime}.npy"
+    if onsup:
+        path = "../" + path
     np.save(path, data)
     return None
 
@@ -254,27 +273,76 @@ def delete_data(dataset_name:list=None, model_name:list=None,
         print(f"Retained {retained} files")
         
             
-            
-            
+def read_idx(filepath):
+    """
+    Reads IDX format files (for MNIST and Fashion-MNIST datasets).
+    """
+    with gzip.open(filepath, 'rb') if filepath.endswith(".gz") else open(filepath, 'rb') as f:
+        # Read the magic number and dimensions
+        magic_number = int.from_bytes(f.read(4), byteorder='big')
+        num_items = int.from_bytes(f.read(4), byteorder='big')
+        if magic_number == 2049:  # Labels
+            data = np.frombuffer(f.read(), dtype=np.uint8)
+            return data
+        elif magic_number == 2051:  # Images
+            rows = int.from_bytes(f.read(4), byteorder='big')
+            cols = int.from_bytes(f.read(4), byteorder='big')
+            data = np.frombuffer(f.read(), dtype=np.uint8).reshape(num_items, rows * cols)
+            return data
+        else:
+            raise ValueError(f"Unsupported magic number: {magic_number}")        
 
 
 
 
 ### MODEL FUNCTIONS ###
+def update_architecture(data:list, input_size:int) -> dict:
+    """
+    Recursively update the values of keys named 'width', 'in_features', or 'out_features'
+    by multiplying them by input_size.
+    Parameters:
+        data (list): the model architecture as a list of layers
+        input_size (int): the number of input features in the data
+    Returns:
+        data (dict): the updated model architecture as a dictionary
+    """
+    # handle control case
+    if len(data) == 1 and isinstance(data[0], int):
+        return [input_size]
+
+    # recursively update widths and feature dimensions
+    for layer in data:
+        for param, value in layer["params"].items():
+            if param in {'width', 'in_features', 'out_features'}:
+                if isinstance(value, (int, float)):
+                    layer["params"][param] = int(value * input_size)
+        if layer["type"] == "Fold":
+            layer["params"]["leak"] = 0.
+    return data
 
 
-def get_model(model_name:str, input_size:int=0, lmnn_default_neighbors:int=3) -> object:
+def get_model(model_name:str, input_size:int=0, output_size:int=0, lmnn_default_neighbors:int=3) -> object:
     """
     Returns a new instance of the model based on the model name.
     Can be "randomforest", "knn", or "metric".
     Parameters:
         model_name (str): The name of the model to train.
-        input_size (int): The dimension of the input data
+        input_size (int): The dimension of the input data.
+        output_size (int): The dimension of the output data.
         lmnn_default_neighbors (int): The number of neighbors to use for the metric learning model
     Returns:
         model: The model to train
     """
-    mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
+    with open(architecture_path) as f:
+        architectures = json.load(f)
+    if model_name in architectures.keys():
+        meta_data = architectures.get(model_name, {})
+        arch = update_architecture(meta_data.get("structure", [1]), input_size=input_size)
+        lr = meta_data.get("learning_rate", 1e-3)
+        mdl = DynamicOrigami(architecture=arch, num_classes=output_size)
+        return mdl, lr
+    else:
+        mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
             KNeighborsClassifier(n_jobs=-1) if model_name == "knn" else \
             LMNN(n_neighbors=lmnn_default_neighbors) if model_name == "metric" else \
             OrigamiFold4(input_size) if model_name == "dl_fold" else \
@@ -346,7 +414,8 @@ def run_standard(model, x_train:np.ndarray, y_train:np.ndarray, x_test:np.ndarra
 
 
 def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray, 
-                      x_test:np.ndarray, y_test:np.ndarray, n_epochs:int=200,
+                      x_test:np.ndarray, y_test:np.ndarray, 
+                      learning_rate:float=1e-3, n_epochs:int=200,
                       return_training:bool=True, verbose:int=0):
     """
     Train a deep learning model and predict on the test set
@@ -357,20 +426,36 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
         x_test (np.ndarray): testing data
         y_test (np.ndarray): testing labels
         n_epochs (int): number of epochs to train the model
-        return_training (bool): whether to return the training data
+        learning_rate (float): the learning rate for the model
+        return_training (bool): whether to return the meta data from train time
         verbose (int): The verbosity level
     Returns:
-        np.ndarray: predictions on the test set
-        np.ndarray: predictions on the training set
-        float: average training time
+        train_losses (list): training losses for each epoch
+        val_losses (list): validation losses for each validation epoch
+        train_accuracies (list): training accuracies for each epoch
+        val_accuracies (list): validation accuracies for each validation epoch
+        train_time (float): average training time
+        inference_speed (float): average inference speed
+        num_parameters (int): number of parameters in the model
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     train_loader = load_data(x_train, y_train)
     val_loader = load_data(x_test, y_test)
     start_time = time.perf_counter()
     train_losses, val_losses, train_accuracies, val_accuracies, *learning_rates = train(model, optimizer, train_loader, val_loader, 
                                                                        validate_rate=0.05, epochs=n_epochs, verbose=verbose)
     end_time = time.perf_counter()
+    
+    # calculate inference speed
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    start_inference = time.perf_counter()
+    with torch.no_grad():
+        y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
+    end_inference = time.perf_counter()
+    inference_speed = (end_inference - start_inference) / len(y_test)
+    
+    # get parameter count
+    num_parameters = sum(p.numel() for p in model.parameters())
     
     if not return_training:
         model.eval()
@@ -380,9 +465,10 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
             y_preds = [model(x.to(DEVICE)).argmax(dim=1) for x, y in val_loader]
         y_pred_trains = torch.cat(y_pred_trains).cpu().numpy()
         y_preds = torch.cat(y_preds).cpu().numpy()  
-        return y_preds, y_pred_trains, end_time - start_time
+        return y_preds, y_pred_trains, end_time - start_time, inference_speed, num_parameters
     
-    return train_losses, val_losses, train_accuracies, val_accuracies, end_time - start_time
+    return train_losses, val_losses, train_accuracies, val_accuracies, \
+            end_time - start_time, inference_speed, num_parameters
 
 
 def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
@@ -421,7 +507,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 
     
     for i in range(repeat):
-        # X_train, y_train = shuffle(X_train, y_train, random_state=i)
+        X_train, y_train = shuffle(X_train, y_train, random_state=i)
         # if len(np.unique(y_train)) < 2:
         #     raise ValueError("Not enough classes in the training data")
 
@@ -433,12 +519,14 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         tmp_X_train, tmp_y_train = X_train[:size], y_train[:size]
         test_size = min(size, len(X_test)//2)
         tmp_X_test, tmp_y_test = X_test[:test_size], y_test[:test_size]
+        outs = len(np.unique(y_train))
         
         # train the model and get performance results
-        if model_name[:2] == "dl":
-            model = get_model(model_name, input_size=X_train.shape[1])
-            train_losses, val_losses, train_accuracies, val_accuracies, train_time = \
-                run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, n_epochs=n_epochs, verbose=verbose)
+        if "Fold" in model_name or "Control" == model_name:
+            model, lr = get_model(model_name, input_size=X_train.shape[1], output_size=outs)
+            train_losses, val_losses, train_accuracies, val_accuracies, train_time, inference_speed, num_parameters = \
+                run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, 
+                                  n_epochs=n_epochs, learning_rate=lr, verbose=verbose)
         else:
             model = get_model(model_name, lmnn_default_neighbors=lmnndn)
             func = run_standard if model_name != "metric" else run_lmnn
@@ -450,26 +538,36 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
             val_accuracies = [acc_test]*val_length
             train_losses = [0]*val_length
             val_losses = [0]*val_length
+            inference_speed = 0
+            num_parameters = 0
 
 
         # Done evaluating, now saving data
-        train_acc = np.array(train_accuracies)
-        val_acc = np.array(val_accuracies)
-        train_loss = np.array(train_losses)
-        val_loss = np.array(val_losses)
-        time_list = np.array(train_time)
+        metric_list = [np.array(train_accuracies), 
+                       np.array(val_accuracies), 
+                       np.array(train_losses), 
+                       np.array(val_losses), 
+                       np.array(train_time), 
+                       np.array(inference_speed), 
+                       np.array(num_parameters)]
         if save_all:
-            for j, data, info_type in zip(range(len(info_list)), info_list, info_titles):
+            # check if the lengths match
+            if len(metric_list) != len(info_list) or len(metric_list) != len(info_titles):
+                print("Error: metric list length does not match info list length")
+                print(f"metric_list: {len(metric_list)}. info_list: {len(info_list)}. info_titles: {len(info_titles)}")
+                if os.isatty(0):
+                    pdb.set_trace() 
+            # save each metric for each iteration
+            for j, data, info_type in zip(range(len(metric_list)), metric_list, info_titles):
                 save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh, repeat=repeat)
-        results_dict[model_name][i] = {"train_loss": train_loss, "val_loss": val_loss,
-                                        "train_acc": train_acc, "val_acc": val_acc,
-                                        "time_list": time_list}
+        results_dict[model_name][i] = {name: value for name, value in zip(info_list, metric_list)}
 
 
     # Done benchmarking, calculate means and stds and saving them
     results_mean = {}
     results_std = {}
     for info in info_list:
+        # compute means and stds of the data for each metric
         values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
         results_mean[info] = np.mean(values, axis=0)
         results_std[info] = np.std(values, axis=0)
@@ -478,16 +576,22 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     if not save_any:
         data_list, val_list, type_list, name_list = [], [], [], []
         for info in info_list:
+            # datalist contains the mean and std for each metric
             data_list.extend([results_mean[info], results_std[info]])
             is_validation = "val" in info
+            # val_list contains whether the data is validation data
             val_list.extend([is_validation, is_validation])
             metric_type = "acc" if "acc" in info else "val" if "val" in info else "time"
+            # type_list contains the type of metric (accuracy, validation, or time)
             type_list.extend([metric_type] * 2)
+            # name_list contains the name of the metric (mean or std)
             name_list.extend(["mean", "std"])
 
+        # save the data
         for data, info_type, name, val in zip(data_list, type_list, name_list, val_list):
             save_data(data, save_constants, info_type, name, val=val, refresh=refresh, repeat=repeat)
 
+    # update the results dictionary with the means and stds
     results_dict[model_name]["mean"] = {info: results_mean[info] for info in info_list}
     results_dict[model_name]["std"] = {info: results_std[info] for info in info_list}
     return results_dict
