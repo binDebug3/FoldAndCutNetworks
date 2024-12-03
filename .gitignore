@@ -10,3 +10,7 @@ BenchmarkTests/__pycache__/
 BenchmarkTests/.ipynb_checkpoints/
 *.pkl
 *.gif
+*.out
+*.err
+BenchmarkTests/RL/logs/*
+*.sh
