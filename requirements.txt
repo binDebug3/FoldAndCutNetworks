@@ -9,3 +9,7 @@ jeffutils
 kaleido
 plotly
 wandb
+# the following are for RL experiments only
+stable-baselines3[extra] 
+fire
+tensorboard
