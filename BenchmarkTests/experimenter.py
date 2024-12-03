@@ -41,7 +41,9 @@ config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
 architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
 data_path = "../data" if onsup else "../data"
 
-
+# this architecture path doesn't work from the RL folder
+if os.getcwd() == '/home/nattd/repos/cs674/FoldAndCutNetworks' :
+    architecture_path = 'BenchmarkTests/architectures.json'
 
 
 
