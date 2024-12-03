@@ -111,31 +111,38 @@ def build_name(val:bool, info_type:str, iteration):
 
 
 def load_result_data(dataset_name:str, model_name:str, info_type:str, iteration:int, 
-              val:bool=False, verbose:bool=False):
+              val:bool=False, verbose:int=0):
     """
     Load the data from the most recent numpy file matching the partial name
     Parameters:
         dataset_name (str): name of the dataset
         model_name (str): name of the model
-        info_type (str): type of information
+        info_type (str): type of information (loss, acc, time, params)
         iteration (int): iteration number
         val (bool): whether the data is validation data
-        verbose (bool): whether to print the error message
+        verbose (int): whether to print the error message
     Returns:
         np.ndarray: data from the numpy file or None if the file does not exist
     """
     dir = build_dir(dataset_name, model_name)
     partial_name = build_name(val, info_type, iteration)
+    
+    # check to see if we want to get the std
+    if info_type in ["acc", "loss", "time"]:
+        do_std = True
+    else:
+        do_std = False
+    
     try:
-        return np.load(get_last_file(dir, partial_name))
+        return np.load(get_last_file(dir, partial_name)), do_std
     except Exception as e:
-        if verbose:
+        if verbose > 1:
             print("Error: file not found")
             try:
                 print(stack_trace(e))
             except NameError:
                 print(e)
-        return None
+        return None, False
     
 
 
@@ -616,8 +623,8 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
     Returns:
         benchmarking (dict): dictionary containing the benchmarking results
     """
-    possible_models = json.load(open(config_path)).get("possible_models")
-    for model_name in possible_models:
+    possible_architectures = list(json.load(open(architecture_path)).keys())
+    for model_name in possible_architectures:
         # skip checking
         if model_name in benchmarking.keys():
             if verbose > 1:
@@ -629,18 +636,31 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
             if verbose > 1:
                 print(f"Skipping '{model_name}' because the folder is empty")
             continue
+
         if verbose > 0:
             print(f"Loading '{model_name}' data from '{folder}'")
-
+        
         benchmarking[model_name] = {}
-
-        metrics = ["loss", "acc", "time"]
-        stats = ["mean", "std"]
+        
+        train_metrics = ["loss", "acc", "time", "params"]
+        # val_metrics = ["loss", "acc", "time"]
+        val_metrics = ["loss"]
 
         # Loop over repeat iterations if needed
         if all_data:
-            for i in range(repeat):
-                benchmarking[model_name][i] = {f"{metric}": {stat: load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
+            for metric in train_metrics:
+                metric_list = []
+                for i in range(repeat):
+                    train_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=False, verbose=verbose)
+                    metric_list.append(train_data)
+                
+                
+                
+                # Do the val metrics
+            for metric in val_metrics:
+                for i in range(repeat):
+                    val_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=True, verbose=verbose)
+                benchmarking[model_name][i] = {f"{metric}": {stat:  
                                                             for metric in metrics for stat in stats}
                                             for metric in metrics}
 
@@ -648,7 +668,8 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
         for stat in stats:
             benchmarking[model_name][stat] = {f"{metric}": load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
                                             for metric in metrics}
-        return benchmarking
+
+    return benchmarking
 
 
 def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
@@ -700,7 +721,7 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
     first=True
 
     if from_data:
-        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat)
+        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat, verbose=verbose)
 
     loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
     subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
@@ -819,7 +840,7 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     cols = math.ceil(info_length / rows)
 
     if from_data:
-        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat)
+        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat, verbose=verbose)
     
     subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
     loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
