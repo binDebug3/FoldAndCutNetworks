@@ -654,17 +654,29 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
                     train_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=False, verbose=verbose)
                     metric_list.append(train_data)
                 
+                # Get the composite array
+                composite_array = np.array(metric_list)
+                mean = np.mean(composite_array, axis=0)
+                if do_std:
+                    std = np.std(composite_array, axis=0)
+                else:
+                    std = np.zeros_like(mean)
+                
+                benchmarking[model_name]['mean'] = {f"{metric}": mean for metric in train_metrics}
                 
                 
-                # Do the val metrics
-            for metric in val_metrics:
-                for i in range(repeat):
-                    val_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=True, verbose=verbose)
-                benchmarking[model_name][i] = {f"{metric}": {stat:  
-                                                            for metric in metrics for stat in stats}
-                                            for metric in metrics}
+                
+                
+                
+        #         # Do the val metrics
+        #     for metric in val_metrics:
+        #         for i in range(repeat):
+        #             val_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=True, verbose=verbose)
+        #         benchmarking[model_name][i] = {f"{metric}": {stat:  
+        #                                                     for metric in metrics for stat in stats}
+        #                                     for metric in metrics}
 
-        # Handle mean and std for benchmarking
+        # # Handle mean and std for benchmarking
         for stat in stats:
             benchmarking[model_name][stat] = {f"{metric}": load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
                                             for metric in metrics}
