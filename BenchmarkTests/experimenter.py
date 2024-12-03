@@ -610,7 +610,9 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 
 ### MODEL EVALUATION ###
 
-def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False, 
+def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name:str, 
+                    train_metrics:list=["loss", "acc", "time", "params"], 
+                    val_metrics:list=["loss"],
                     repeat:int=5, verbose:int=0) -> dict:
     """
     Rebuild the benchmarking results from the numpy files
@@ -626,7 +628,7 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
     possible_architectures = list(json.load(open(architecture_path)).keys())
     for model_name in possible_architectures:
         # skip checking
-        if model_name in benchmarking.keys():
+        if model_name in train_benchmarking.keys():
             if verbose > 1:
                 print("Skipping", model_name, "because it is already loaded")
             continue
@@ -639,49 +641,62 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
 
         if verbose > 0:
             print(f"Loading '{model_name}' data from '{folder}'")
+
+        train_benchmarking[model_name] = {}
+        val_benchmarking[model_name] = {}
+
+        # Loop over all metrics we want to load
+        mean_metric_dict = {}
+        std_metric_dict = {}
+        for metric in train_metrics:
+            metric_list = []
+            for i in range(repeat):
+                train_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=False, verbose=verbose)
+                metric_list.append(train_data)
+            
+            # Get the composite array
+            composite_array = np.array(metric_list)
+            mean = np.mean(composite_array, axis=0)
+            if do_std:
+                std = np.std(composite_array, axis=0)
+            else:
+                std = np.zeros_like(mean)
+            
+            # store them in the temporary dictionary
+            mean_metric_dict[metric] = mean
+            std_metric_dict[metric] = std
+            
+        # store the temporary dictionary in the benchmarking dictionary
+        train_benchmarking[model_name]['mean'] = mean_metric_dict
+        train_benchmarking[model_name]['std'] = std_metric_dict
         
-        benchmarking[model_name] = {}
-        
-        train_metrics = ["loss", "acc", "time", "params"]
-        # val_metrics = ["loss", "acc", "time"]
-        val_metrics = ["loss"]
-
-        # Loop over repeat iterations if needed
-        if all_data:
-            for metric in train_metrics:
-                metric_list = []
-                for i in range(repeat):
-                    train_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=False, verbose=verbose)
-                    metric_list.append(train_data)
-                
-                # Get the composite array
-                composite_array = np.array(metric_list)
-                mean = np.mean(composite_array, axis=0)
-                if do_std:
-                    std = np.std(composite_array, axis=0)
-                else:
-                    std = np.zeros_like(mean)
-                
-                benchmarking[model_name]['mean'] = {f"{metric}": mean for metric in train_metrics}
-                
-                
-                
-                
-                
-        #         # Do the val metrics
-        #     for metric in val_metrics:
-        #         for i in range(repeat):
-        #             val_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=True, verbose=verbose)
-        #         benchmarking[model_name][i] = {f"{metric}": {stat:  
-        #                                                     for metric in metrics for stat in stats}
-        #                                     for metric in metrics}
-
-        # # Handle mean and std for benchmarking
-        for stat in stats:
-            benchmarking[model_name][stat] = {f"{metric}": load_result_data(dataset_name, model_name, metric, stat, val=(stat=="val")) 
-                                            for metric in metrics}
-
-    return benchmarking
+        # Do the validation metrics
+        mean_metric_dict = {}
+        std_metric_dict = {}
+        for metric in val_metrics:
+            metric_list = []
+            for i in range(repeat):
+                val_data, do_std = load_result_data(dataset_name, model_name, metric, i, val=True, verbose=verbose)
+                metric_list.append(val_data)
+            
+            # Get the composite array
+            composite_array = np.array(metric_list)
+            mean = np.mean(composite_array, axis=0)
+            if do_std:
+                std = np.std(composite_array, axis=0)
+            else:
+                std = np.zeros_like(mean)
+            
+            # store them in the temporary dictionary
+            mean_metric_dict[metric] = mean
+            std_metric_dict[metric] = std
+            
+        # add additional key and values to the benchmarking dictionary
+        val_benchmarking[model_name]['mean'] = mean_metric_dict
+        val_benchmarking[model_name]['std'] = std_metric_dict
+    
+    # print(train_benchmarking)
+    return train_benchmarking,val_benchmarking
 
 
 def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
@@ -733,8 +748,8 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
     first=True
 
     if from_data:
-        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat, verbose=verbose)
-
+        benchmarking = rebuild_results(benchmarking, dataset_name, repeat=repeat, verbose=verbose)
+    
     loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
     subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=subs)
@@ -812,7 +827,9 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
     
 def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
                  save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
-                 errors:str='raise', rows:int=1, verbose:int=0) -> None:
+                 errors:str='raise', rows:int=1, verbose:int=0,
+                 train_metrics:list=["loss", "acc", "time", "params"],
+                 val_metrics:list=["loss"]) -> None:
     """
     Plot the benchmarking results
     Parameters:
@@ -847,19 +864,29 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     colors = ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e']
     n_epochs = json.load(open(config_path)).get("num_epochs")
     info_list = json.load(open(config_path)).get("info_list")
-    info_length = len(info_list)
     pnt_density = 20
-    cols = math.ceil(info_length / rows)
+    train_info_length = len(train_metrics)
+    val_info_length = len(val_metrics)
+    train_cols = math.ceil(train_info_length / rows)
+    val_cols = math.ceil(val_info_length / rows)
 
     if from_data:
-        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat, verbose=verbose)
-    
+        train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name, repeat=repeat, verbose=verbose, train_metrics=train_metrics, val_metrics=val_metrics)
     subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
-    loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
-    plt.figure(figsize=(scale*cols, scale*rows), dpi=25*scale)
-    for j, (model_name, model_results) in enumerate(benchmarking.items()):
-        for i, (info_type, means), (_, stds), subtitle in zip(range(info_length), model_results["mean"].items(), model_results["std"].items(), subs):
-            loop.update()
+    loop = tqdm(total=len(train_benchmarking.items())+len(val_benchmarking.items()), position=0, leave=True, disable=verbose<0)
+    
+    ##### training_benchmarking and validation_benchmarking are correct
+    ##### Start here, figure out how we want to plot all of our different models
+    ##### Make a way to subset the models we want to plot, or an option for all of them
+    ##### Manually take out that second loop and get the unique plots the way we want them to be.
+    ##### Maybe have models to group together, or a way to group them together
+    ##### Think about how to display the time and parameter counts too
+    
+    
+    # Set up the train figure
+    plt.figure(figsize=(scale*train_cols, scale*rows), dpi=25*scale)
+    for j, (model_name, model_results) in enumerate(train_benchmarking.items()):
+        for i, (info_type, means), (_, stds), subtitle in zip(range(train_info_length), model_results["mean"].items(), model_results["std"].items(), subs):
             try:
                 start = 0
                 if type(means) == np.float64:
@@ -880,9 +907,12 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
                 if errors == "flag":
                     print("Error with", model_name, info_type, "-", e)
                     continue
-            plt.subplot(rows, cols, i+1)
+            # Get the standard errors:
+            standard_errors = stds / np.sqrt(repeat)    
+                
+            plt.subplot(rows, train_cols, i+1)
             plt.plot(domain, means, label=model_name, marker='o', color=colors[j])
-            plt.fill_between(domain, means - stds, means + stds, alpha=0.2, color=colors[j])
+            plt.fill_between(domain, means - 2*standard_errors, means + 2*standard_errors, alpha=0.2, color=colors[j])
             plt.xlabel("Epoch")
             plt.ylabel(info_ylabels[i])
             if "acc" in info_type:
@@ -891,6 +921,8 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
                 plt.yscale('log')
             plt.title(subtitle)
             plt.legend()
+            
+        loop.update()
     plt.suptitle(f"Model Benchmarking on '{dataset_name}'")
     plt.tight_layout()
     loop.close()
