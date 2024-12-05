@@ -825,48 +825,46 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
         fig.write_image(os.path.join(fig_path, fig_name))
     fig.show()
     
-def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
-                 save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
-                 errors:str='raise', verbose:int=0,
+def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
+                 save_fig:bool=True, replace_fig:bool=False, 
+                 models_per_graph=None, scale_percentile=None, fontsize=15,
                  train_metrics:list=["loss", "acc", "time", "params"],
-                 val_metrics:list=["loss"], col_names:list= ['Validation Loss','Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
-                 models_per_graph=None, scale_percentile=None,
-                 fontsize=15) -> None:
+                 val_metrics:list=["loss"], 
+                 col_names:list= ['Validation Loss','Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
+                 errors:str='raise',verbose:int=0) -> None:
     """
     Plot the benchmarking results
     Parameters:
-        benchmarking (dict): dictionary containing the benchmarking results
         constants (tuple): contains
-            data_sizes (list(int)): list of data sizes
             datetime (str): current date and time
             dataset_name (str): name of the dataset
         scale (int): scale of the figure
         repeat (int): number of times to repeat the experiment
         save_fig (bool): whether to save the figure
         replace_fig (bool): whether to replace the old figure
-        from_data (bool): whether to load the data from the numpy files
+        models_per_graph (int): number of models to plot on each row of graphs
+        scale_percentile (float): the percentile of points we want to cut off in our y-axis
+        fontsize (int): the fontsize of the text
         errors (str): how to handle errors
-        rows (str): how to arrange the subplots
         verbose (int): the verbosity level
     """
     assert errors in ["raise", "ignore", "flag"], f"'errors' must be 'raise', 'ignore', or 'flag' not '{errors}'"
-    assert len(constants) == 3, f"constants must have 3 elements not {len(constants)}"
+    assert type(dataset_name) == str, f"dataset name must be a string, not {type(dataset_name)}"
     assert type(scale) == int, f"'scale' must be an integer not {type(scale)}"
     assert scale > 0 and scale < 20, f"'scale' must be between 0 and 20 not {scale}"
     assert type(repeat) == int, f"'repeat' must be an integer not {type(repeat)}"
     assert repeat > 0, f"'repeat' must be greater than 0 not {repeat}"
     assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
     assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
-    assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
     
     # Get the constants
-    data_sizes, datetime, dataset_name = constants
+    date_format = "%y%m%d@%H%M"
+    date_time = dt.datetime.now().strftime(date_format)
     n_epochs = json.load(open(config_path)).get("num_epochs")
     pnt_density = 20
     
-    # Get our data
-    if from_data:
-        train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name, repeat=repeat, verbose=verbose, train_metrics=train_metrics, val_metrics=val_metrics)
+    # Load the data
+    train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name, repeat=repeat, verbose=verbose, train_metrics=train_metrics, val_metrics=val_metrics)
     
     # Figure out how many rows we need
     train_items = list(train_benchmarking.items())
@@ -920,7 +918,6 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     # Find the max and min scales
     border = .1
     scales = {i: [np.min(scales[i]) - border*np.abs(np.min(scales[i])), np.max(scales[i]) + border*np.abs(np.max(scales[i]))] for i in range(num_cols-1)}
-    print(scales)
     # Set up the figure to plot
     plt.figure(figsize=(scale*num_cols, scale*num_rows*.75), dpi=25*scale)
     current_row = 0
@@ -1028,7 +1025,7 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
         if verbose > 0:
             print("Saving your figure...")
         fig_path = f"results/{dataset_name}/charts/"
-        fig_name = f"benchmarking_{datetime}.png"
+        fig_name = f"benchmarking_{date_time}.png"
         if not os.path.exists(fig_path):
             os.makedirs(fig_path)
         if replace_fig:
