@@ -827,9 +827,11 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
     
 def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
                  save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
-                 errors:str='raise', rows:int=1, verbose:int=0,
+                 errors:str='raise', verbose:int=0,
                  train_metrics:list=["loss", "acc", "time", "params"],
-                 val_metrics:list=["loss"]) -> None:
+                 val_metrics:list=["loss"], col_names:list= ['Validation Loss','Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
+                 models_per_graph=None, scale_percentile=None,
+                 fontsize=15) -> None:
     """
     Plot the benchmarking results
     Parameters:
@@ -856,76 +858,170 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
     assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
     assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
-    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}"
-    assert rows > 0, f"'cols' must be greater than 0 not {rows}"
     
+    # Get the constants
     data_sizes, datetime, dataset_name = constants
-    info_ylabels = ["Loss", "Loss", "Accuracy (%)", "Accuracy (%)", "Training Time (s)"] #, "Prediction Time (s)"
-    colors = ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e']
     n_epochs = json.load(open(config_path)).get("num_epochs")
-    info_list = json.load(open(config_path)).get("info_list")
     pnt_density = 20
-    train_info_length = len(train_metrics)
-    val_info_length = len(val_metrics)
-    train_cols = math.ceil(train_info_length / rows)
-    val_cols = math.ceil(val_info_length / rows)
-
+    
+    # Get our data
     if from_data:
         train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name, repeat=repeat, verbose=verbose, train_metrics=train_metrics, val_metrics=val_metrics)
-    subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
-    loop = tqdm(total=len(train_benchmarking.items())+len(val_benchmarking.items()), position=0, leave=True, disable=verbose<0)
     
-    ##### training_benchmarking and validation_benchmarking are correct
-    ##### Start here, figure out how we want to plot all of our different models
-    ##### Make a way to subset the models we want to plot, or an option for all of them
-    ##### Manually take out that second loop and get the unique plots the way we want them to be.
-    ##### Maybe have models to group together, or a way to group them together
-    ##### Think about how to display the time and parameter counts too
+    # Figure out how many rows we need
+    train_items = list(train_benchmarking.items())
+    val_items = list(val_benchmarking.items())
+    num_models = len(train_items)
+    num_train_plots = len(train_items[0][1]['mean'])
+    num_val_plots = len(val_items[0][1]['mean'])
+    if models_per_graph is not None:
+        num_rows = int(math.ceil(num_models / models_per_graph))
+    else:
+        num_rows = 1
+        models_per_graph = num_models
+        
+    # calculate the number of columns
+    num_cols = num_train_plots + num_val_plots + 1
+    if num_cols != len(col_names) + 1:
+        print(f"Warning: Must specify the correct number of column names. Expected {num_cols-1} but got {len(col_names)}")
+        col_names = ["Val " + name for name in val_metrics] + ["Train " + name for name in train_metrics]
+    col_names = ["Model"] + col_names
     
+    # Get the names of the models and the colors
+    model_names = [model_name for model_name, _ in train_items]
+    cmap = plt.get_cmap('tab20')
+    colors = [cmap(i / models_per_graph) for i in range(models_per_graph)]
     
-    # Set up the train figure
-    plt.figure(figsize=(scale*train_cols, scale*rows), dpi=25*scale)
-    for j, (model_name, model_results) in enumerate(train_benchmarking.items()):
-        for i, (info_type, means), (_, stds), subtitle in zip(range(train_info_length), model_results["mean"].items(), model_results["std"].items(), subs):
-            try:
-                start = 0
-                if type(means) == np.float64:
-                    means = np.array([means])
-                    stds = np.array([stds])
-                    start = j
-                if len(means) > pnt_density:
-                    # downsample the 1d means data where pnt_density is the number of points desired
-                    sep = max(int(len(means) / pnt_density), 1)
-                    means = means[::sep]
-                    stds = stds[::sep]
-                domain = np.linspace(start, n_epochs, len(means))
-            except TypeError as e:
-                if errors == "raise":
-                    raise e
-                if errors == "ignore":
-                    continue
-                if errors == "flag":
-                    print("Error with", model_name, info_type, "-", e)
-                    continue
-            # Get the standard errors:
-            standard_errors = stds / np.sqrt(repeat)    
+    # Find the upper and lower percentiles for the scale
+    if scale_percentile is None:
+        lower_percentile, upper_percentile = .025, .975
+    elif scale_percentile < 0 or scale_percentile > 1:
+        raise ValueError("scale_percentile must be between 0 and 1")
+    else:
+        lower_percentile, upper_percentile = scale_percentile/2, 1 - scale_percentile/2
+    scales = {i:[] for i in range(num_cols-1)}
+    
+    # Loop through the models and find the scales
+    for j in range(num_models):
+        model_name, train_results = train_items[j]
+        _, val_results = val_items[j]
+        train_means = train_results['mean']
+        val_means = val_results["mean"]
+        means = list(val_means.items()) + list(train_means.items())
+        
+        # Loop through the different types of graphs to plot
+        for i, (info_type, means) in enumerate(means):
+            if info_type in ["time", "params"]:
+                scales[i].append(means)
+            else:
+                scales[i].append(np.percentile(means, 100*upper_percentile))
+                scales[i].append(np.percentile(means, 100*lower_percentile))
                 
-            plt.subplot(rows, train_cols, i+1)
-            plt.plot(domain, means, label=model_name, marker='o', color=colors[j])
-            plt.fill_between(domain, means - 2*standard_errors, means + 2*standard_errors, alpha=0.2, color=colors[j])
-            plt.xlabel("Epoch")
-            plt.ylabel(info_ylabels[i])
-            if "acc" in info_type:
-                plt.axhline(y=1, color='k', linestyle='--')
-            if "time" in info_type:
-                plt.yscale('log')
-            plt.title(subtitle)
-            plt.legend()
+    # Find the max and min scales
+    border = .1
+    scales = {i: [np.min(scales[i]) - border*np.abs(np.min(scales[i])), np.max(scales[i]) + border*np.abs(np.max(scales[i]))] for i in range(num_cols-1)}
+    print(scales)
+    # Set up the figure to plot
+    plt.figure(figsize=(scale*num_cols, scale*num_rows*.75), dpi=25*scale)
+    current_row = 0
+    model_name_dictionary = {}
+    
+    # Loop through the models and get the items from the model
+    loop = tqdm(total=num_rows, position=0, leave=True, disable=verbose<0)
+    for j in range(num_models):
+        model_name, train_results = train_items[j]
+        model_name_dictionary[model_name] = str(j)
+        val_results = val_items[j][1]
+        train_means = train_results["mean"]
+        train_stds = train_results["std"]
+        val_means = val_results["mean"]
+        val_stds = val_results["std"]
+        color_index = j % len(colors)
+        
+        # Get the means and std list
+        means = list(val_means.items()) + list(train_means.items())
+        stds =  list(val_stds.items()) + list(train_stds.items())
+        
+        # Loop through the different graphs and get the right subplot
+        for i, (info_type, means), (_, stds) in zip(range(num_cols-1), means, stds):
+            plt.subplot(num_rows, num_cols, current_row*num_cols+i+2)
+            if current_row == 0:
+                plt.title(col_names[i+1], fontsize=fontsize)
             
+            # If it is a loss or accuracy, plot it with the standard error bars
+            if info_type in ["loss", "acc"]:
+                try:
+                    start = 0
+                    if type(means) == np.float64:
+                        means = np.array([means])
+                        stds = np.array([stds])
+                        start = j
+                    if len(means) > pnt_density:
+                        # downsample the 1d means data where pnt_density is the number of points desired
+                        sep = max(int(len(means) / pnt_density), 1)
+                        means = means[::sep]
+                        stds = stds[::sep]
+                    domain = np.linspace(start, n_epochs, len(means))
+                except TypeError as e:
+                    if errors == "raise":
+                        raise e
+                    if errors == "ignore":
+                        continue
+                    if errors == "flag":
+                        print("Error with", model_name, info_type, "-", e)
+                        continue
+                    
+                # Get the standard errors and plot the function 
+                standard_errors = stds / np.sqrt(repeat)    
+                plt.plot(domain, means, label=model_name, marker='o', color=colors[color_index])
+                plt.fill_between(domain, means - 2*standard_errors, means + 2*standard_errors, alpha=0.2, color=colors[color_index])
+                plt.ylim(scales[i])
+                # plt.xlabel("Epoch")
+                # plt.ylabel(info_type)
+                
+                # If it is accuracy, plot a dotted line at 1
+                if info_type == "loss": # This is reversed as of rn with 'acc'
+                    plt.axhline(y=1, color='k', linestyle='--')
+                    plt.ylim(scales[i])
+                    plt.ylim([0, 1.1])
+            
+            # If it is time, do a log bar plot of the time
+            elif info_type == "time":
+                plt.bar(model_name_dictionary[model_name], means, yerr=stds, color=colors[color_index], label=model_name)
+                # plt.ylabel(info_type)
+                # ylimit = scales[i]
+                # ylimit[0] = 0
+                plt.ylim(scales[i])
+                plt.yscale("log")
+            
+            # If it is params, do a bar plot of the number of parameters
+            elif info_type == "params":
+                plt.bar(model_name_dictionary[model_name], means, yerr=stds, color=colors[color_index], label=model_name)
+                # plt.ylabel(info_type)
+                plt.ylim(scales[i])
+                
+        # If we have collected enough models, record their names in the correct subplot
+        if (j+1) % models_per_graph == 0:
+            plt.subplot(num_rows, num_cols, current_row*num_cols+1)
+            if current_row == 0:
+                plt.title("Model Name", fontsize=fontsize)
+            current_row += 1
+            
+            # Get the names of the models and plot empty lines
+            name_list = model_names[j+1-models_per_graph:j+1]
+            for k,name in enumerate(name_list):
+                plt.plot([], [], label=f"{model_name_dictionary[name]}: "+name, color=colors[k], lw=fontsize/2)  # Thicker lines in the legend
+            
+            # Make the legend and turn off the axes
+            plt.legend(loc="center", fontsize=fontsize)
+            plt.axis("off")  # Turn off the axes for the legend area
+            
+        # update the loop
         loop.update()
-    plt.suptitle(f"Model Benchmarking on '{dataset_name}'")
-    plt.tight_layout()
     loop.close()
+    
+    # Add our titles and add a little bit of padding
+    plt.suptitle(f"Model Benchmarking on '{dataset_name}'", fontsize=fontsize*1.5)
 
     # save and show the figure
     if save_fig:
