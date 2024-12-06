@@ -1,0 +1,16 @@
+{
+  "os":  "macOS-14.5-arm64-arm-64bit",
+  "python":  "3.12.4",
+  "startedAt":  "2024-11-15T18:23:42.063546Z",
+  "program":  "/Users/samlayton/Desktop/Work/Github/Open Source Repositories/FoldAndCutNetworks/d-sam.ipynb",
+  "git":  {
+    "remote":  "https://github.com/binDebug3/FoldAndCutNetworks.git",
+    "commit":  "4c980ba338c60971cda48b7d2f473ec4dd949acf"
+  },
+  "email":  "samlayton99@gmail.com",
+  "root":  "/Users/samlayton/Desktop/Work/Github/Open Source Repositories/FoldAndCutNetworks",
+  "host":  "Sams-MacBook-Air-3.local",
+  "username":  "samlayton",
+  "executable":  "/Users/samlayton/PythonEnv/envs/general_ml/bin/python",
+  "codePathLocal":  "d-sam.ipynb"
+}

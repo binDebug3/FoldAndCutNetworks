@@ -1,0 +1,17 @@
+{"time":"2024-11-15T11:46:08.947913-07:00","level":"INFO","msg":"using version","core version":"0.18.7"}
+{"time":"2024-11-15T11:46:08.947949-07:00","level":"INFO","msg":"created symlink","path":"/Users/samlayton/Desktop/Work/Github/Open Source Repositories/FoldAndCutNetworks/wandb/run-20241115_114608-6gg5njc5/logs/debug-core.log"}
+{"time":"2024-11-15T11:46:09.058688-07:00","level":"INFO","msg":"created new stream","id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:09.05872-07:00","level":"INFO","msg":"stream: started","id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:09.058735-07:00","level":"INFO","msg":"writer: Do: started","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:09.058799-07:00","level":"INFO","msg":"handler: started","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:09.058851-07:00","level":"INFO","msg":"sender: started","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:09.347375-07:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-11-15T11:46:09.439896-07:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-11-15T11:46:09.44014-07:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-11-15T11:46:10.442499-07:00","level":"INFO","msg":"handler: operation stats","stats":{"operations":[{"desc":"saving job artifact","runtime_seconds":0.740617042}],"total_operations":1}}
+{"time":"2024-11-15T11:46:11.997176-07:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2024-11-15T11:46:13.16284-07:00","level":"INFO","msg":"stream: closing","id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:13.162856-07:00","level":"INFO","msg":"handler: closed","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:13.162866-07:00","level":"INFO","msg":"writer: Close: closed","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:13.162869-07:00","level":"INFO","msg":"sender: closed","stream_id":"6gg5njc5"}
+{"time":"2024-11-15T11:46:13.162921-07:00","level":"INFO","msg":"stream: closed","id":"6gg5njc5"}

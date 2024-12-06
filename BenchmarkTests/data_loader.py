@@ -37,7 +37,7 @@ print("\nWorking Directory:", os.getcwd(), "\n")
 onsup = 'SLURM_JOB_ID' in os.environ
 config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
 architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
-data_path = "../data" if onsup else "../data"
+data_path = "../data" if onsup else "data"
 
 
 
@@ -225,6 +225,11 @@ def load_covertype(astorch=False, shuffle=True, random_state=None, test_size=0.2
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size,
                                                         random_state=random_state, shuffle=shuffle)
+    
+    #make sure the labels are 0-indexed
+    y_test = y_test - 1
+    y_train = y_train - 1
+
     if verbose > 0:
         print("\tX shape:", X_train.shape)
         print("\ty shape:", y_train.shape)
@@ -324,20 +329,12 @@ def load_digits_data(astorch:bool=False, shuffle:bool=True, random_state:int=Non
     else:
         train_data = pd.read_csv(train_path, header=0, index_col = 0)
         test_data = pd.read_csv(test_path, header=0, index_col = 0)
+        df = pd.concat([train_data, test_data])
+        X = df.values
+        y = df.index.values
 
-        X_train = train_data.values
-        y_train = train_data.index.values
-
-        X_test = test_data.values
-        y_test = test_data.index.values
-
-        if shuffle:
-            random_idx = np.random.permutation(len(X_train))
-            X_train = X_train[random_idx]
-            y_train = y_train[random_idx]
-            random_idx = np.random.permutation(len(X_test))
-            X_test = X_test[random_idx]
-            y_test = y_test[random_idx]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
+                                                            random_state=random_state, shuffle=shuffle)
 
     if verbose > 0:
         print("\tX shape: ", X_train.shape)
@@ -426,21 +423,14 @@ def load_fashion(astorch:bool=False, shuffle:bool=True, random_state:int=None, t
     else:
        train_data = pd.read_csv(train_path, header=0, index_col=0)
        test_data = pd.read_csv(test_path, header=0, index_col=0)
+    
+    df = pd.concat([train_data, test_data])
 
-    X_train = train_data.values
-    y_train = train_data.index.values
-
-    X_test = test_data.values
-    y_test = test_data.index.values
-
-    # shuffle data
-    if shuffle:
-        random_idx = np.random.permutation(len(X_train))
-        X_train = X_train[random_idx]
-        y_train = y_train[random_idx]
-        random_idx = np.random.permutation(len(X_test))
-        X_test = X_test[random_idx]
-        y_test = y_test[random_idx]
+    X = df.values
+    y = df.index.values
+    
+    # split values and shuffle data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=random_state, shuffle=shuffle)
 
     # Reshape X_train and X_test to be 2D arrays (flatten the 28x28 images)
     X_train = X_train.reshape(X_train.shape[0], -1)

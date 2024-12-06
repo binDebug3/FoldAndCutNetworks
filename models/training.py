@@ -112,7 +112,58 @@ def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.devic
     return avg_val_loss, avg_val_accuracy
 
 
+class EarlyStopping:
+    def __init__(self, validate_rate, epochs, train_window = None, val_window = None, default_val_window = .2, default_train_window = .1):
+        # Initialize our hyperparameters
+        self.validate_rate = validate_rate
+        self.epochs = epochs
+        self.train_window = train_window
+        self.val_window = val_window
+        self.default_val_window = default_val_window
+        self.default_train_window = default_train_window
+        
+        # Calculate the number of validation steps
+        self.val_steps = epochs // int(validate_rate * epochs)
+        default_val = int(1/self.default_val_window)
+        default_train = int(1/self.default_train_window)
+        
+        # Calculate the windows if they are none
+        if val_window is None:
+            self.val_window = self.val_steps // default_val
+        if train_window is None:
+            self.train_window = self.epochs // default_train
+            
+        # Initialize the our stop variable and our scores
+        self.early_stop = False
+        self.cur_train = None
+        self.past_train = None
+        self.cur_val = None
+        self.past_val = None
 
+    def __call__(self, train_loss, val_loss = None):
+        # Check if we have enough train scores to compare
+        if len(train_loss)-1 < self.train_window:
+            return
+        
+        # Get the current and past scores of training
+        self.cur_train = np.mean(train_loss[-self.train_window:])
+        self.past_train = np.mean(train_loss[-self.train_window-1:-1])
+        
+        # Check if current training is greater than past training
+        if self.cur_train >= self.past_train:
+            self.early_stop = True
+            return
+        
+        # Check if we have enough validation scores to compare
+        if len(val_loss)-1 >= self.val_window:
+            self.cur_val = np.mean(val_loss[-self.val_window:])
+            self.past_val = np.mean(val_loss[-self.val_window-1:-1])
+            
+            # Check if current validation is greater than past validation
+            if self.cur_val >= self.past_val:
+                self.early_stop = True
+                return
+            
 
 ################################# Training function #################################
 def train(model, optimizer:torch.optim.Optimizer, 
@@ -120,7 +171,8 @@ def train(model, optimizer:torch.optim.Optimizer,
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
           validate_rate:float=0, lr_schedule=None,
-          early_stopping_tol:float=0., verbose:int=0):
+          train_stop_window:int=None,val_stop_window:int=None,
+          verbose:int=0):
     """
     This function trains the neural network.
     Parameters:
@@ -156,8 +208,9 @@ def train(model, optimizer:torch.optim.Optimizer,
     val_separation = int(validate_rate * epochs)
     lr_scheduler = LRSchedulerWrapper(lr_schedule)
 
-    # Define a loop object to keep track of training and loop through the epochs
+    # Define a loop object to keep track of training and loop through the epochs, also early stopping object
     loop = tqdm(total=epochs, position=0, leave=True, disable=verbose==0)
+    early_stopping = EarlyStopping(validate_rate, epochs, train_window = train_stop_window, val_window = val_stop_window)
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
@@ -197,13 +250,15 @@ def train(model, optimizer:torch.optim.Optimizer,
         # Calculate the validation loss and accuracy
         if val_separation > 0 and (i+1) % val_separation == 0:
             val_loss, val_accuracy = validate(model, val_dataloader, DEVICE)
-            stop_count = 3
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
-            if len(val_accuracies) > stop_count and np.allclose(np.array(val_accuracies[-stop_count:]), val_accuracy, atol=early_stopping_tol):
-                if verbose > 0:
-                    print(f"Early stopping at epoch {i+1}")
-                break
+        
+        # Check for early stopping
+        early_stopping(train_losses, val_losses)
+        if early_stopping.early_stop:
+            if verbose > 0:
+                print(f"Early stopping at epoch {i+1}")
+            break
     
     # Close the loop and return the losses and accuracies
     loop.close()
