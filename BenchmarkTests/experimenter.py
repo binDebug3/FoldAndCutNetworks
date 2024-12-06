@@ -543,10 +543,10 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 
 
         # Done evaluating, now saving data
-        metric_list = [np.array(train_accuracies), 
-                       np.array(val_accuracies), 
-                       np.array(train_losses), 
+        metric_list = [np.array(train_losses), 
                        np.array(val_losses), 
+                       np.array(train_accuracies), 
+                       np.array(val_accuracies), 
                        np.array(train_time), 
                        np.array(inference_speed), 
                        np.array(num_parameters)]
@@ -808,7 +808,7 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
     assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
     assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
-    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}
+    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}"
     assert type(sup_data) == bool, f"'sup_data' must be a boolean not {type(sup_data)}"
     assert type(verbose) == int, f"'verbose' must be an integer not {type(verbose)}"
     assert rows > 0, f"'cols' must be greater than 0 not {rows}"
