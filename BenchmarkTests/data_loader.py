@@ -540,6 +540,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
             X_train, X_test, y_train, y_test = data_loader(random_state=rs, test_size=test_size, 
                                                         astorch=astorch, verbose=verbose)
         train_size = len(X_train)
+        ratio_list = [1] if len(ratio_list) == 0 else ratio_list
         sample_sizes = [int(ratio*train_size) for ratio in ratio_list]
         sample_size_list.append(sample_sizes)
         experiment_info = (dataset_name, sample_sizes, X_train, y_train, X_test, y_test)

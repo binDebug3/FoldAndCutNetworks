@@ -512,7 +512,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         #     raise ValueError("Not enough classes in the training data")
 
         # set up data sample
-        size = data_sizes[-1]
+        size = data_sizes[-1] if len(data_sizes) > 0 else None
         if size is None or size > len(X_train):
             data_sizes[data_sizes.index(size)] = len(X_train)
             size = len(X_train)
@@ -603,7 +603,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 ### MODEL EVALUATION ###
 
 def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False, 
-                    repeat:int=5, verbose:int=0) -> dict:
+                    repeat:int=5, sup_data:bool=False, verbose:int=0) -> dict:
     """
     Rebuild the benchmarking results from the numpy files
     Parameters:
@@ -611,11 +611,13 @@ def rebuild_results(benchmarking:dict, dataset_name:str, all_data:bool=False,
         data_set (str): name of the dataset
         all_data (bool): whether to load all the data or just the means and std
         repeat (int): number of times to repeat the experiment
+        sup_date (bool): Whether the data is downloaded from the supercomputer
         verbose (int): the verbosity level
     Returns:
         benchmarking (dict): dictionary containing the benchmarking results
     """
     possible_models = json.load(open(config_path)).get("possible_models")
+    possible_models += json.load(open(architecture_path)).keys()
     for model_name in possible_models:
         # skip checking
         if model_name in benchmarking.keys():
@@ -778,7 +780,7 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
     
 def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
                  save_fig:bool=True, replace_fig:bool=False, from_data:bool=True, 
-                 errors:str='raise', rows:int=1, verbose:int=0) -> None:
+                 errors:str='raise', rows:int=1, sup_data:bool=False, verbose:int=0) -> None:
     """
     Plot the benchmarking results
     Parameters:
@@ -794,6 +796,7 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
         from_data (bool): whether to load the data from the numpy files
         errors (str): how to handle errors
         rows (str): how to arrange the subplots
+        sup_data (bool): Whether the data is downloaded from the supercomputer
         verbose (int): the verbosity level
     """
     assert errors in ["raise", "ignore", "flag"], f"'errors' must be 'raise', 'ignore', or 'flag' not '{errors}'"
@@ -805,7 +808,9 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     assert type(save_fig) == bool, f"'save_fig' must be a boolean not {type(save_fig)}"
     assert type(replace_fig) == bool, f"'replace_fig' must be a boolean not {type(replace_fig)}"
     assert type(from_data) == bool, f"'from_data' must be a boolean not {type(from_data)}"
-    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}"
+    assert type(rows) == int, f"'cols' must be an integer not {type(rows)}
+    assert type(sup_data) == bool, f"'sup_data' must be a boolean not {type(sup_data)}"
+    assert type(verbose) == int, f"'verbose' must be an integer not {type(verbose)}"
     assert rows > 0, f"'cols' must be greater than 0 not {rows}"
     
     data_sizes, datetime, dataset_name = constants
@@ -818,7 +823,7 @@ def plot_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
     cols = math.ceil(info_length / rows)
 
     if from_data:
-        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat)
+        benchmarking = rebuild_results(benchmarking, dataset_name, all_data=True, repeat=repeat, sup_data=sup_data)
     
     subs = [f"{' '.join([word.capitalize() for word in info_type.split('_')])}" for info_type in info_list]
     loop = tqdm(total=len(benchmarking.items())*info_length, position=0, leave=True, disable=verbose<0)
