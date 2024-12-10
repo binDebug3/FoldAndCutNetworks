@@ -14,3 +14,4 @@ BenchmarkTests/.ipynb_checkpoints/
 *.err
 BenchmarkTests/RL/logs/*
 *.sh
+BenchmarkTests/GNN/datasets/*
