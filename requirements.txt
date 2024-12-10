@@ -9,7 +9,9 @@ jeffutils
 kaleido
 plotly
 wandb
-# the following are for RL experiments only
+# for RL experiments 
 stable-baselines3[extra] 
+gymnasium[mujoco]
 fire
-tensorboard
+# for GNN experiments
+torch_geometric
