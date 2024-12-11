@@ -8,6 +8,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.sac.policies import Actor, ContinuousCritic
 # from stable_baselines3.common.policies import 
 from BenchmarkTests.experimenter import get_model
+import json
 
 class FoldAndCutRLNetwork(nn.Module):
     """
@@ -23,8 +24,9 @@ class FoldAndCutRLNetwork(nn.Module):
         self,
         model_name: str,
         feature_dim: int,
-        last_layer_dim_pi: int = 64,
-        last_layer_dim_vf: int = 64
+        last_layer_dim_pi: int,
+        last_layer_dim_vf: int,
+        no_relu: bool
     ):
         super().__init__()
 
@@ -35,10 +37,14 @@ class FoldAndCutRLNetwork(nn.Module):
 
         # Policy network
         self.policy_net, lr = get_model(model_name, input_size=feature_dim,
-                                        output_size=last_layer_dim_pi)
+                                        output_size=last_layer_dim_pi, 
+                                        architecture_path_local='BenchmarkTests/RL/rl_architectures.json',
+                                        no_cut=True, no_relu=no_relu)
         # Value network
         self.value_net, lr = get_model(model_name, input_size=feature_dim,
-                                       output_size=last_layer_dim_pi)
+                                       output_size=last_layer_dim_vf, 
+                                       architecture_path_local='BenchmarkTests/RL/rl_architectures.json',
+                                       no_cut=True, no_relu=no_relu)
         self.lr = lr
 
     def forward(self, features: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
@@ -65,10 +71,12 @@ class CustomPPOPolicy(ActorCriticPolicy):
         action_space: spaces.Space,
         lr_schedule: Callable[[float], float],
         model_name: str = None,
+        no_relu: bool = None,
         *args,
         **kwargs,
     ):
         self.model_name = model_name
+        self.no_relu = no_relu
 
         # Disable orthogonal initialization
         kwargs["ortho_init"] = False
@@ -82,8 +90,17 @@ class CustomPPOPolicy(ActorCriticPolicy):
         )
 
     def _build_mlp_extractor(self) -> None:
+        with open('BenchmarkTests/RL/rl_architectures.json') as f :
+            architectures = json.load(f)
+        model_dict = architectures.get(self.model_name, {})
+        output_dim = model_dict['structure'][-1]['params']['width'] if \
+                        'Fold' in model_dict['structure'][-1]['type'] else \
+                        model_dict['structure'][-1]['params']['out_features']
         self.mlp_extractor = FoldAndCutRLNetwork(self.model_name, 
-                                                 self.features_dim)
+                                                 self.features_dim,
+                                                 self.features_dim*output_dim,
+                                                 self.features_dim*output_dim,
+                                                 self.no_relu)
 
 
 class CustomSACPolicy(SACPolicy):
@@ -105,7 +122,9 @@ class CustomSACPolicy(SACPolicy):
 
     def make_actor(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> Actor:
         actor_kwargs = self._update_features_extractor(self.actor_kwargs, features_extractor)
-        actor_net, lr = get_model(self.model_name, input_size=self.observation_space.shape[0], output_size=self.action_space.shape[0])
+        actor_net, lr = get_model(self.model_name, input_size=self.observation_space.shape[0], 
+                                  output_size=self.action_space.shape[0],
+                                  architecture_path_local='BenchmarkTests/RL/rl_architectures.json')
         return Actor(
             observation_space=self.observation_space,
             action_space=self.action_space,
@@ -151,6 +170,7 @@ class CustomContinuousCritic(ContinuousCritic) :
         # now make them ourselves, but with FoldAndCutNetworks instead of MLPs
         self.q_networks: list[nn.Module] = []
         for idx in range(self.n_critics):
-            q_net, lr = get_model(model_name, self.observation_space.shape[0] + self.action_space.shape[0], output_size=1)
+            q_net, lr = get_model(model_name, self.observation_space.shape[0] + self.action_space.shape[0], output_size=1, 
+                                  architecture_path_local='BenchmarkTests/RL/rl_architectures.json')
             self.add_module(f"qf{idx}", q_net)
             self.q_networks.append(q_net)
