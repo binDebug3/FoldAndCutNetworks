@@ -41,10 +41,6 @@ config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
 architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
 data_path = "../data" if onsup else "../data"
 
-# this architecture path doesn't work from the RL folder
-if os.getcwd() == '/home/nattd/repos/cs674/FoldAndCutNetworks' :
-    architecture_path = 'BenchmarkTests/architectures.json'
-
 
 
 ### HELPER FUNCTIONS ###
@@ -324,7 +320,8 @@ def update_architecture(data:list, input_size:int) -> dict:
     return data
 
 
-def get_model(model_name:str, input_size:int=0, output_size:int=0, lmnn_default_neighbors:int=3) -> object:
+def get_model(model_name:str, input_size:int=0, output_size:int=0, lmnn_default_neighbors:int=3, 
+              architecture_path_local:str=None, no_cut:bool=False, no_relu:bool=False) -> object:
     """
     Returns a new instance of the model based on the model name.
     Can be "randomforest", "knn", or "metric".
@@ -333,16 +330,22 @@ def get_model(model_name:str, input_size:int=0, output_size:int=0, lmnn_default_
         input_size (int): The dimension of the input data.
         output_size (int): The dimension of the output data.
         lmnn_default_neighbors (int): The number of neighbors to use for the metric learning model
+        architecture_path_local (str): an alternative path to an architecture json to use, default: BenchmarkTests/architectures.json
+        no_cut (bool): if true, then the final linear layer is not included and only the layers specified in the architecture dictionary
     Returns:
         model: The model to train
     """
-    with open(architecture_path) as f:
-        architectures = json.load(f)
+    if architecture_path_local is None : 
+        with open(architecture_path) as f:
+            architectures = json.load(f)
+    else : 
+        with open(architecture_path_local) as f: 
+            architectures = json.load(f)
     if model_name in architectures.keys():
         meta_data = architectures.get(model_name, {})
         arch = update_architecture(meta_data.get("structure", [1]), input_size=input_size)
         lr = meta_data.get("learning_rate", 1e-3)
-        mdl = DynamicOrigami(architecture=arch, num_classes=output_size)
+        mdl = DynamicOrigami(architecture=arch, num_classes=output_size, no_cut=no_cut, no_relu=no_relu)
         return mdl, lr
     else:
         mdl = RandomForestClassifier(n_jobs=-1) if model_name == "randomforest" else \
