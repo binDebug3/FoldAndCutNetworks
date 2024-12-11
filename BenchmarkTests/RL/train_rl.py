@@ -8,8 +8,6 @@ import json
 import os
 
 def main(env:str, model_index:int, mlp:bool, no_relu:bool) :
-    # mlp = mlp == 'true' # easier for slurm to pass it as a string
-
     # load the benchmark model names
     with open('BenchmarkTests/RL/rl_architectures.json') as f:
         architectures = json.load(f)
