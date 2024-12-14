@@ -6,7 +6,7 @@ import torch_geometric.transforms as T
 from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
 from torch_geometric.loader import DataLoader
-from torch_geometric.datasets import TUDataset, GNNBenchmarkDataset, QM7b, QM9
+from torch_geometric.datasets import TUDataset, GNNBenchmarkDataset, AttributedGraphDataset, QM9
 from torch_geometric.utils import degree
 
 
@@ -23,15 +23,25 @@ class NormalizedDegree(object):
 
 
 # One training epoch for GNN model.
-def train(train_loader, model, optimizer, device):
-    model.train()
-
+def train(train_loader, model, ds_name, optimizer, device):
+    model.train() # training mode
+    
     for i, data in enumerate(train_loader):
         print(i / len(train_loader))
         data = data.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, data.y)
+
+        # Set the correct loss for each dataset we use
+        loss_types = {
+            "ENZYMES": F.cross_entropy(output, data.y),
+            "Cora": F.cross_entropy(output, data.y),
+            "MNIST": F.cross_entropy(output, data.y),
+            "CIFAR10": F.cross_entropy(output, data.y),
+            "QM9": F.mse_loss(output, data.y)
+        }
+
+        loss = loss_types[ds_name]
         loss.backward()
         optimizer.step()
 
@@ -54,7 +64,26 @@ def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=
                        num_repetitions=10, all_std=True):
     # Load dataset and shuffle.
     path = osp.join(osp.dirname(osp.realpath(__file__)), 'datasets', ds_name)
-    dataset = TUDataset(path, name=ds_name).shuffle()
+    # Get parent data housing from dataset name
+    data_parents = {
+        "ENZYMES": "TUDataset"
+        "QM9": "QM9",
+        "MNIST": "GNNBenchmarkDataset",
+        "CIFAR10": "GNNBenchmarkDataset",
+        "Cora": "AttributedGraphDataset"
+    }
+    data_parent = data_parents[ds_name]
+    # Load dataset
+    if data_parent == "TUDataset":
+        dataset = TUDataset(path, name=ds_name).shuffle()
+    elif data_parent == "QM9":
+        dataset = QM9(path)
+    elif data_parent == "GNNBenchmarkDataset":
+        dataset = GNNBenchmarkDataset(path, name=ds_name).shuffle()
+    elif data_parent == "AttributedGraphDataset":
+        dataset = AttributedGraphDataset(path, name=ds_name).shuffle()
+    else:
+        raise Exception(f"Unable to load datastet {ds_name}")
 
     # One-hot degree if node labels are not available.
     # The following if clause is taken from  https://github.com/rusty1s/pytorch_geometric/blob/master/benchmark/kernel/datasets.py.
@@ -73,69 +102,73 @@ def gnn_evaluation(gnn, ds_name, layers, hidden, max_num_epochs=200, batch_size=
             dataset.transform = NormalizedDegree(mean, std)
 
     # Set device.
-    device = torch.device('cpu') # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    for i in range(num_repetitions):
-        # Test acc. over all folds.
+    # device = torch.device('cpu') 
+    torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        kf = KFold(n_splits=10, shuffle=True)
-        dataset.shuffle()
+    # Set up cross validation
+    if ds_name == "Cora":
+        num_folds = 1 # Cora only has one graph
+    else:
+        num_folds = 5
 
-        test_accuracies_all = []
-        test_accuracies_complete = []
+    kf = KFold(n_splits=num_folds, shuffle=True)
+    dataset.shuffle()
 
-        # Collect val. and test acc. over all hyperparameter combinations.
-        for l in layers:
-            for h in hidden:
+    test_accuracies_all = []
+    test_accuracies_complete = []
 
-                test_accuracies = []
+    # Collect val. and test acc. over all hyperparameter combinations.
+    for l in layers:
+        for h in hidden:
 
-                for train_val_index, test_index in kf.split(list(range(len(dataset)))):
-                    # Sample 10% split from training split for validation.
-                    train_index, val_index = train_test_split(train_val_index, test_size=0.1)
-                    best_val_acc = 0.0
-                    best_test = 0.0
-                    
+            test_accuracies = []
 
-                    # Split data.
-                    train_dataset = dataset[train_index.tolist()]
-                    val_dataset = dataset[val_index.tolist()]
-                    test_dataset = dataset[test_index.tolist()]
+            for train_val_index, test_index in kf.split(list(range(len(dataset)))):
+                # Sample 10% split from training split for validation.
+                train_index, val_index = train_test_split(train_val_index, test_size=0.1)
+                best_val_acc = 0.0
+                best_test = 0.0
+                
 
-                    # Prepare batching.
-                    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-                    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
-                    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+                # Split data.
+                train_dataset = dataset[train_index.tolist()]
+                val_dataset = dataset[val_index.tolist()]
+                test_dataset = dataset[test_index.tolist()]
 
-                    # Setup model.
-                    model = gnn(in_channels=dataset.num_features, hidden_channels=h, 
-                                num_layers=l, num_classes=dataset.num_classes, graph_level_task=True).to(device)
-                    model.reset_parameters()
+                # Prepare batching.
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+                val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-                    optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
-                    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
-                                                                           factor=factor, patience=patience,
-                                                                           min_lr=0.0000001)
-                    for epoch in range(1, max_num_epochs + 1):
-                        lr = scheduler.optimizer.param_groups[0]['lr']
-                        train(train_loader, model, optimizer, device)
-                        val_acc = test(val_loader, model, device)
-                        scheduler.step(val_acc)
+                # Setup model.
+                model = gnn(in_channels=dataset.num_features, hidden_channels=h, 
+                            num_layers=l, num_classes=dataset.num_classes, graph_level_task=True).to(device)
+                model.reset_parameters()
 
-                        if val_acc > best_val_acc:
-                            best_val_acc = val_acc
-                            best_test = best_val_acc
-                            # best_test = test(test_loader, model, device) * 100.0
+                optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
+                                                                        factor=factor, patience=patience,
+                                                                        min_lr=0.0000001)
+                for epoch in range(1, max_num_epochs + 1):
+                    lr = scheduler.optimizer.param_groups[0]['lr']
+                    train(train_loader, model, ds_name, optimizer, device)
+                    val_acc = test(val_loader, model, device)
+                    scheduler.step(val_acc)
 
-                        # Break if learning rate is smaller 10**-6.
-                        if lr < min_lr:
-                            break
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
+                        best_test = best_val_acc
+                        # best_test = test(test_loader, model, device) * 100.0
 
-                    test_accuracies.append(best_test)
-                    if all_std:
-                        test_accuracies_complete.append(best_test)
+                    # Break if learning rate is smaller 10**-6.
+                    if lr < min_lr:
+                        break
 
-                test_accuracies_all.append(float(np.array(test_accuracies).mean()))
+                test_accuracies.append(best_test)
+                if all_std:
+                    test_accuracies_complete.append(best_test)
+
+            test_accuracies_all.append(float(np.array(test_accuracies).mean()))
 
     if all_std:
         return np.array(test_accuracies_all)

@@ -9,8 +9,6 @@ class GCNFoldConv(GCNConv) :
         self,
         in_channels: int,
         out_channels: int,
-        num_folds: int,
-        dim_increase: List[float],
         has_stretch: bool,
         crease: Optional[float] = None,
         improved: bool = False,
@@ -32,10 +30,11 @@ class GCNFoldConv(GCNConv) :
         )
         if out_channels >= in_channels :
             del self.lin
-            self.lin = nn.Sequential()
-            for layer in num_folds :
-                self.lin.append(SoftFold(int(round((1-dim_increase[layer])*in_channels + dim_increase[layer]*out_channels)), 
-                                         crease=crease, has_stretch=has_stretch))
+            self.lin = nn.Sequential(
+                nn.Linear(in_channels, out_channels),
+                nn.ReLU(),
+                SoftFold(out_channels, crease=crease, has_stretch=has_stretch)
+            )
             
 
 class SAGEFoldConv(SAGEConv):
