@@ -48,14 +48,24 @@ class FoldGCN(GCN):
         return GCNFoldConv(in_channels, out_channels, self.has_stretch, crease=self.crease, **kwargs)
 
 class GCNNetwork(nn.Module) :
-    """Neural net that """
-    def __init__(self, in_channels, hidden_channels, num_layers, num_classes, graph_level_task:bool, ):
+    """Graph Convolutional Network that either utilizes the standard GCN model from torch_geometric.nn.models
+    or our custom FoldGCN model depending on the 'fold' parameter."""
+    def __init__(self, in_channels, hidden_channels, num_layers, num_classes, graph_level_task:bool, fold=False):
         super(GCNNetwork, self).__init__()
+        # Check prediction task
         if graph_level_task:
-            self.gin = GCN(in_channels, hidden_channels, num_layers)
+            # Check model to use
+            if fold:
+                self.gin = FoldGCN(in_channels, hidden_channels, num_layers)
+            else:
+                self.gin = GCN(in_channels, hidden_channels, num_layers)
             self.fc = nn.Linear(hidden_channels, num_classes)
         else: 
-            self.gin = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
+            # Check model to use
+            if fold:
+                self.gin = FoldGCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
+            else:
+                self.gin = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
         self.graph_level_task = graph_level_task
     
     def forward(self, batch) :
