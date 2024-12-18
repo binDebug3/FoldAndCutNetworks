@@ -9,6 +9,7 @@ from stable_baselines3.sac.policies import Actor, ContinuousCritic
 # from stable_baselines3.common.policies import 
 from BenchmarkTests.experimenter import get_model
 import json
+import numpy as np
 
 class FoldAndCutRLNetwork(nn.Module):
     """
@@ -98,8 +99,8 @@ class CustomPPOPolicy(ActorCriticPolicy):
                         model_dict['structure'][-1]['params']['out_features']
         self.mlp_extractor = FoldAndCutRLNetwork(self.model_name, 
                                                  self.features_dim,
-                                                 self.features_dim*output_dim,
-                                                 self.features_dim*output_dim,
+                                                 int(np.round(self.features_dim*output_dim)),
+                                                 int(np.round(self.features_dim*output_dim)),
                                                  self.no_relu)
 
 
