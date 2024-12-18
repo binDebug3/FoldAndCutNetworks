@@ -1,6 +1,6 @@
 from torch_geometric.nn.conv import GCNConv, SAGEConv, GraphConv, GATConv, GATv2Conv, TransformerConv
 from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
-from BenchmarkTests.experimenter import get_model
+from experimenter import get_model
 from models.folds import SoftFold
 import torch.nn as nn
 
@@ -8,6 +8,8 @@ class GCNFoldConv(GCNConv) :
     def __init__(
         self,
         in_channels: int,
+        hidden_channels: int,
+        num_layers: int,
         out_channels: int,
         has_stretch: bool,
         crease: Optional[float] = None,
@@ -31,9 +33,10 @@ class GCNFoldConv(GCNConv) :
         if out_channels >= in_channels :
             del self.lin
             self.lin = nn.Sequential(
-                nn.Linear(in_channels, out_channels),
+                # Each "layer" will be a linear layer followed by a soft fold
+                nn.Linear(in_channels, hidden_channels),
                 nn.ReLU(),
-                SoftFold(out_channels, crease=crease, has_stretch=has_stretch)
+                SoftFold(hidden_channels, crease=crease, has_stretch=has_stretch)
             )
             
 

@@ -27,21 +27,18 @@ def train(train_loader, model, ds_name, optimizer, device):
     model.train() # training mode
     
     for i, data in enumerate(train_loader):
-        print(i / len(train_loader))
+        # print(i / len(train_loader))
         data = data.to(device)
         optimizer.zero_grad()
         output = model(data)
 
         # Set the correct loss for each dataset we use
-        loss_types = {
-            "ENZYMES": F.cross_entropy(output, data.y),
-            "Cora": F.cross_entropy(output, data.y),
-            "MNIST": F.cross_entropy(output, data.y),
-            "CIFAR10": F.cross_entropy(output, data.y),
-            "QM9": F.mse_loss(output, data.y)
-        }
-
-        loss = loss_types[ds_name]
+        if ds_name in {"ENZYMES", "Cora", "MNIST", "CIFAR10"}:
+            loss = F.cross_entropy(output, data.y)
+        elif ds_name in {"QM9"}:
+            loss = F.mse_loss(output, data.y)
+        else:
+            raise Exception("Dataset does not have loss specified in train()")
         loss.backward()
         optimizer.step()
 
@@ -60,8 +57,18 @@ def test(loader, model, device):
 
 
 # 5-CV for GNN training and hyperparameter selection.
-def gnn_evaluation(gnn, ds_name, layers=2, hidden=1, max_num_epochs=200, batch_size=128, start_lr=0.01, 
+def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_epochs=200, batch_size=128, start_lr=0.01, 
                    min_lr = 0.000001, factor=0.5, patience=5, all_std=True):
+    """
+    Run an evaluation of our GNN.
+    
+    Parameters:
+        gnn (class): uninitialized model class
+        ds_name (str): name of dataset to use
+        layers (list): list of numbers of layers in the model (each is tested)
+        hidden (list): list of sizes for the hidden layers (each is tested)
+        fold (bool): whether to 
+    """
     # Load dataset and shuffle.
     path = osp.join(osp.dirname(osp.realpath(__file__)), 'datasets', ds_name)
     # Get parent data housing from dataset name
@@ -102,8 +109,8 @@ def gnn_evaluation(gnn, ds_name, layers=2, hidden=1, max_num_epochs=200, batch_s
             dataset.transform = NormalizedDegree(mean, std)
 
     # Set device.
-    # device = torch.device('cpu') 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu') 
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
     # Set up cross validation
     if ds_name == "Cora":
@@ -129,7 +136,6 @@ def gnn_evaluation(gnn, ds_name, layers=2, hidden=1, max_num_epochs=200, batch_s
                 best_val_acc = 0.0
                 best_test = 0.0
                 
-
                 # Split data.
                 train_dataset = dataset[train_index.tolist()]
                 val_dataset = dataset[val_index.tolist()]
@@ -141,9 +147,12 @@ def gnn_evaluation(gnn, ds_name, layers=2, hidden=1, max_num_epochs=200, batch_s
                 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
                 # Setup model.
-                model = gnn(in_channels=dataset.num_features, hidden_channels=h, 
+                model = gnn(dataset.num_features, hidden_channels=h,
                             num_layers=l, num_classes=dataset.num_classes, graph_level_task=True).to(device)
-                model.reset_parameters()
+                try:
+                    model.reset_parameters()
+                except:
+                    pass
 
                 optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
                 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
@@ -153,6 +162,7 @@ def gnn_evaluation(gnn, ds_name, layers=2, hidden=1, max_num_epochs=200, batch_s
                     lr = scheduler.optimizer.param_groups[0]['lr']
                     train(train_loader, model, ds_name, optimizer, device)
                     val_acc = test(val_loader, model, device)
+                    print(f"Epoch {epoch}; Validation accuracy: {val_acc}")
                     scheduler.step(val_acc)
 
                     if val_acc > best_val_acc:

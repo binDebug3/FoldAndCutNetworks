@@ -1,9 +1,9 @@
-from BenchmarkTests.GNN.custom_conv_layers import GCNFoldConv, SAGEFoldConv, GATFoldConv, GATv2FoldConv
+from custom_conv_layers import GCNFoldConv, SAGEFoldConv, GATFoldConv, GATv2FoldConv
 from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN
 from torch_geometric.nn.conv import MessagePassing, GINConv
 from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
 from torch_geometric.nn.pool import global_mean_pool, global_max_pool
-from BenchmarkTests.experimenter import get_model
+from experimenter import get_model
 import torch.nn as nn
 
 ### Graph Convolutional Network classes ###
@@ -30,6 +30,8 @@ class FoldGCN(GCN):
         jk: Optional[str] = None,
         **kwargs,
     ):
+        self.has_stretch = has_stretch
+        self.crease = crease
         super().__init__(
             in_channels=in_channels,
             hidden_channels=hidden_channels,
@@ -44,8 +46,6 @@ class FoldGCN(GCN):
             jk=jk,
             **kwargs
         )
-        self.has_stretch = has_stretch
-        self.crease = crease
     def init_conv(self, in_channels: int, out_channels: int,
                   **kwargs) -> MessagePassing:
         return GCNFoldConv(in_channels, out_channels, self.has_stretch, crease=self.crease, **kwargs)
@@ -53,28 +53,29 @@ class FoldGCN(GCN):
 class GCNNetwork(nn.Module) :
     """
     Graph Convolutional Network that either utilizes the standard GCN model from torch_geometric.nn.models
-    or our custom FoldGCN model depending on the 'fold' parameter.
+    or our custom FoldGCN model depending on the 'fold' parameter. Supports testing various datasets, 
+    hidden layer sizes, and number of layers.
     """
-    def __init__(self, in_channels, hidden_channels, num_layers, num_classes, graph_level_task:bool, fold=False):
+    def __init__(self, in_channels, hidden_channels=32, num_layers=1, num_classes=2, graph_level_task:bool=False, fold=False):
         super(GCNNetwork, self).__init__()
         # Check prediction task
         if graph_level_task:
             # Check model to use
             if fold:
-                self.gin = FoldGCN(in_channels, hidden_channels, num_layers)
+                self.gcn = FoldGCN(in_channels, hidden_channels, num_layers)
             else:
-                self.gin = GCN(in_channels, hidden_channels, num_layers)
+                self.gcn = GCN(in_channels, hidden_channels, num_layers)
             self.fc = nn.Linear(hidden_channels, num_classes)
         else: 
             # Check model to use
             if fold:
-                self.gin = FoldGCN(in_channels, hidden_channels=hidden_channels, num_layers=num_layers, out_channels=num_classes)
+                self.gcn = FoldGCN(in_channels, hidden_channels=hidden_channels, num_layers=num_layers, out_channels=num_classes)
             else:
-                self.gin = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
+                self.gcn = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
         self.graph_level_task = graph_level_task
     
     def forward(self, batch):
-        x = self.gin(batch.x, batch.edge_index)
+        x = self.gcn(batch.x, batch.edge_index)
         if self.graph_level_task:
             x = global_max_pool(x, batch.batch)
             x = self.fc(x)
