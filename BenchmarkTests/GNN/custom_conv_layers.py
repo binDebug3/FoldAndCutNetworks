@@ -11,7 +11,7 @@ class GCNFoldConv(GCNConv) :
         hidden_channels: int,
         num_layers: int,
         out_channels: int,
-        has_stretch: bool,
+        has_stretch: bool = False,
         crease: Optional[float] = None,
         improved: bool = False,
         cached: bool = False,
@@ -32,12 +32,16 @@ class GCNFoldConv(GCNConv) :
         )
         if out_channels >= in_channels :
             del self.lin
-            self.lin = nn.Sequential(
-                # Each "layer" will be a linear layer followed by a soft fold
-                nn.Linear(in_channels, hidden_channels),
-                nn.ReLU(),
-                SoftFold(hidden_channels, crease=crease, has_stretch=has_stretch)
-            )
+
+            # Initialize the repeated blocks
+            layers = []
+            for i in range(num_layers):
+                layers.append(nn.Linear(in_channels if i == 0 else hidden_channels, hidden_channels))
+                layers.append(nn.ReLU())
+                layers.append(SoftFold(hidden_channels, crease=crease, has_stretch=has_stretch))
+            
+            # Combine all layers into a sequential block
+            self.lin = nn.Sequential(*layers)
             
 
 class SAGEFoldConv(SAGEConv):

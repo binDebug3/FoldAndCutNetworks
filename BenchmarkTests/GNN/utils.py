@@ -1,4 +1,5 @@
 import os.path as osp
+import json
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -91,6 +92,10 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
         dataset = AttributedGraphDataset(path, name=ds_name).shuffle()
     else:
         raise Exception(f"Unable to load datastet {ds_name}")
+    if ds_name in {"MNIST", "CIFAR10", "QM9", "ENZYMES"}:
+        graph_level_task = True
+    else: 
+        graph_level_task = False
 
     # One-hot degree if node labels are not available.
     # The following if clause is taken from  https://github.com/rusty1s/pytorch_geometric/blob/master/benchmark/kernel/datasets.py.
@@ -109,8 +114,8 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
             dataset.transform = NormalizedDegree(mean, std)
 
     # Set device.
-    device = torch.device('cpu') 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu') 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
     # Set up cross validation
     if ds_name == "Cora":
@@ -128,6 +133,7 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
     for l in layers:
         for h in hidden:
 
+            experiment_report = {"Layers": l, "Hidden Size": h}
             test_accuracies = []
 
             for train_val_index, test_index in kf.split(list(range(len(dataset)))):
@@ -147,8 +153,9 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
                 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
                 # Setup model.
-                model = gnn(dataset.num_features, hidden_channels=h,
-                            num_layers=l, num_classes=dataset.num_classes, graph_level_task=True).to(device)
+                model = gnn(dataset.num_features, hidden_channels=h, num_layers=l, num_classes=dataset.num_classes, 
+                            graph_level_task=graph_level_task, fold=fold).to(device)
+                num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
                 try:
                     model.reset_parameters()
                 except:
@@ -156,8 +163,8 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
 
                 optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
                 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
-                                                                        factor=factor, patience=patience,
-                                                                        min_lr=0.0000001)
+                                                                       factor=factor, patience=patience,
+                                                                       min_lr=0.0000001)
                 for epoch in range(1, max_num_epochs + 1):
                     lr = scheduler.optimizer.param_groups[0]['lr']
                     train(train_loader, model, ds_name, optimizer, device)
@@ -179,6 +186,20 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
                     test_accuracies_complete.append(best_test)
 
             test_accuracies_all.append(float(np.array(test_accuracies).mean()))
+            experiment_report["Average Best Accuracy"] = float(np.array(test_accuracies).mean())
+            experiment_report["Parameters"] = num_params
+
+            # Save to a JSON file
+            if fold:
+                fold_style = "Fold" 
+            else:
+                fold_style = "NoFold"
+            try:
+                with open(f"BenchmarkTests/GNN/experiments/{ds_name}_{fold_style}.json", "w") as json_file:
+                    json.dump(data, json_file, indent=4)
+            except FileNotFoundError:
+                with open(f"{ds_name}_{fold_style}.json", "w") as json_file:
+                    json.dump(experiment_report, json_file, indent=4)
 
     if all_std:
         return np.array(test_accuracies_all)

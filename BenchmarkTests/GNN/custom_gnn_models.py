@@ -16,10 +16,10 @@ class FoldGCN(GCN):
     def __init__(
         self,
         in_channels: int,
-        hidden_channels: int = 1,
-        num_layers: int = 2,
-        has_stretch: bool = False,
+        hidden_channels: int,
+        num_layers: int,
         out_channels: Optional[int] = None,
+        has_stretch: bool = False,
         crease: Optional[float] = None,
         dropout: float = 0.0,
         act: Union[str, Callable, None] = "relu",
@@ -46,9 +46,8 @@ class FoldGCN(GCN):
             jk=jk,
             **kwargs
         )
-    def init_conv(self, in_channels: int, out_channels: int,
-                  **kwargs) -> MessagePassing:
-        return GCNFoldConv(in_channels, out_channels, self.has_stretch, crease=self.crease, **kwargs)
+    def init_conv(self, in_channels: int, hidden_channels: int, **kwargs) -> MessagePassing:
+        return GCNFoldConv(in_channels, hidden_channels, self.num_layers, self.out_channels, self.has_stretch, crease=self.crease, **kwargs)
 
 class GCNNetwork(nn.Module) :
     """

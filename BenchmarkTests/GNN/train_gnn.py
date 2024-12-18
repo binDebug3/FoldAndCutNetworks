@@ -27,17 +27,17 @@ def main(dataset:str, fold=False, layers=[1], hidden=[32]):
     log_path = 'BenchmarkTests/GNN/logs/' + dataset + '/'
 
     # Train model
-    test_accs = gnn_evaluation(GCNNetwork, dataset, fold=fold, )
+    test_accs = gnn_evaluation(GCNNetwork, dataset, fold=fold, layers=layers, hidden=hidden, max_num_epochs=500)
     
     # Save output
     try:
         test_accs_path = log_path + "test_accuracies.txt"
         with open(test_accs_path, "w") as f:
-            f.write((test_accs))
+            f.write(str(test_accs))
     except FileNotFoundError:
         test_accs_path = "test_accuracies.txt"
         with open(test_accs_path, "w") as f:
-            f.write((test_accs))
+            f.write(str(test_accs))
 
 
 
