@@ -9,13 +9,16 @@ import torch.nn as nn
 ### Graph Convolutional Network classes ###
 
 class FoldGCN(GCN):
-    """Adjusted Graph Convolutional Network model that uses folding layers"""
+    """
+    Adjusted Graph Convolutional Network model that uses folding layers. Takes
+    some unnecessary parameters to correctly initialize parent class.
+    """
     def __init__(
         self,
         in_channels: int,
-        hidden_channels: int,
-        num_layers: int,
-        has_stretch: bool,
+        hidden_channels: int = 1,
+        num_layers: int = 2,
+        has_stretch: bool = False,
         out_channels: Optional[int] = None,
         crease: Optional[float] = None,
         dropout: float = 0.0,
@@ -27,7 +30,7 @@ class FoldGCN(GCN):
         jk: Optional[str] = None,
         **kwargs,
     ):
-        super.__init__(
+        super().__init__(
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
@@ -48,8 +51,10 @@ class FoldGCN(GCN):
         return GCNFoldConv(in_channels, out_channels, self.has_stretch, crease=self.crease, **kwargs)
 
 class GCNNetwork(nn.Module) :
-    """Graph Convolutional Network that either utilizes the standard GCN model from torch_geometric.nn.models
-    or our custom FoldGCN model depending on the 'fold' parameter."""
+    """
+    Graph Convolutional Network that either utilizes the standard GCN model from torch_geometric.nn.models
+    or our custom FoldGCN model depending on the 'fold' parameter.
+    """
     def __init__(self, in_channels, hidden_channels, num_layers, num_classes, graph_level_task:bool, fold=False):
         super(GCNNetwork, self).__init__()
         # Check prediction task
@@ -63,14 +68,14 @@ class GCNNetwork(nn.Module) :
         else: 
             # Check model to use
             if fold:
-                self.gin = FoldGCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
+                self.gin = FoldGCN(in_channels, hidden_channels=hidden_channels, num_layers=num_layers, out_channels=num_classes)
             else:
                 self.gin = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
         self.graph_level_task = graph_level_task
     
-    def forward(self, batch) :
+    def forward(self, batch):
         x = self.gin(batch.x, batch.edge_index)
-        if self.graph_level_task :
+        if self.graph_level_task:
             x = global_max_pool(x, batch.batch)
             x = self.fc(x)
         return x

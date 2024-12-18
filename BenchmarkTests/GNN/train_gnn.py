@@ -1,71 +1,43 @@
-import fire
-from stable_baselines3 import SAC, PPO
-from BenchmarkTests.RL.custom_policy import CustomPPOPolicy, CustomSACPolicy
-from stable_baselines3.common.env_util import make_vec_env
-from BenchmarkTests.RL.utils import count_parameters, NumParamsCallback
-import numpy as np
-import json
 import os
+import json
+
+import fire
+import numpy as np
+
+from custom_gnn_models import GCNNetwork
+from utils import gnn_evaluation
 
 
-def main(dataset:str, model_index:int, mlp:bool, no_relu:bool, fold:bool):
-    """Run experiments with graph neural networks.
+
+
+def main(dataset:str, fold:bool):
+    """
+    Test graph neural networks that use standard MLPs against ones that use fold layers.
     
     Params:
         dataset (str): dataset to be used
-        model_index (int)
-        mlp (bool)
-        no_relu (bool): whether to do a ReLU after linear layers
-        fold (bool): whether
+        fold (bool): whether our GCN is a standard one or uses custom folding
     """
+    # Save outputs
+    log_path = 'BenchmarkTests/GNN/logs/' + dataset + '/'
 
-    log_path = 'BenchmarkTests/RL/logs/' + env.split('-')[0] + '/'
-    if env in ['CartPole-v1', 'LunarLander-v3']:
-        vec_env = make_vec_env(env, n_envs=1)
-        custom_policy_kwargs=dict(model_name=model_name, no_relu=no_relu)
-        model = PPO(CustomPPOPolicy, vec_env, n_steps=256, policy_kwargs=custom_policy_kwargs, 
-                    verbose=1, tensorboard_log=log_path, device='cpu')
-        if mlp:
-            num_params = count_parameters(model)
-            action_dim = 2 if env == 'CartPole-v1' else 4
-            # this solves for the root of the polynomial that maps hidden dimension size
-            # to the number of parameters in the PPO model whose networks have 2 hidden layers 
-            # to get the hidden size to make the MlpPolicy match the number of parameters in the custom policy
-            a = 2
-            b = 2*vec_env.observation_space.shape[0] + action_dim + 5
-            c = action_dim + 1 - num_params
-            mlp_size = int(np.round((-b + np.sqrt(b**2 - 4*a*c))/(2*a)))
-            policy_kwargs=dict(net_arch=dict(pi=[mlp_size, mlp_size], vf=[mlp_size, mlp_size]))
-            model = PPO("MlpPolicy", vec_env, n_steps=256, policy_kwargs=policy_kwargs, 
-                        verbose=1, tensorboard_log=log_path, device='cpu')
-    
-    elif env == "HalfCheetah-v4" :
-        if model_index == -1 :
-            model = SAC('MlpPolicy', "HalfCheetah-v4", verbose=1, tensorboard_log=log_path)
-        else : 
-            custom_policy_kwargs=dict(
-                model_name=benchmark_models[model_index],
-                share_features_extractor=False    
-            )
-            model = SAC(CustomSACPolicy, "HalfCheetah-v4", 
-                        policy_kwargs=custom_policy_kwargs, verbose=1, tensorboard_log=log_path)
-    
+    data_channels = {
+        "ENZYMES": [3, 6],
+        "QM9": [11, 19],
+        "MNIST": [3, 10],
+        "CIFAR10": [5, 10],
+        "Cora": [1433, 7]
+    }
+
+    # Make model
+    model = GCNNetwork(in_channels=data_channels[dataset][0], num_classes=data_channels[dataset][1])
     # Train model
-    model.learn(total_timesteps=60000, tb_log_name=get_exp_name(log_path, benchmark_models[model_index], mlp, no_relu),
-                callback=NumParamsCallback())
+    test_accs = gnn_evaluation(model, dataset)
     
-
-
-def get_exp_name(log_path:str, model_name:str, mlp:bool, no_relu:bool) :
-    no_relu_str = '_no_relu' if no_relu else ''
-    tb_log_name = model_name + '/mlp' if mlp else model_name + '/fold' + no_relu_str
-    i = 1
-    while True : 
-        if not os.path.isdir(log_path + tb_log_name + f'_{i}') :
-            tb_log_name += f'_{i}'
-            break
-        i += 1
-    return tb_log_name
+    # Save output
+    test_accs_path = log_path + "test_accuracies.txt"
+    with open(test_accs_path, "w") as f:
+        f.write((test_accs))
 
 
 
