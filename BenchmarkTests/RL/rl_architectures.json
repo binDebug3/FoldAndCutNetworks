@@ -1,4 +1,48 @@
 {
+    "two_hidden_layer_4x_softfold_has_stretch": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 4}},
+            {"type": "SoftFold", "params": {"width": 4, "has_stretch": true}},
+            {"type": "Linear", "params": {"in_features": 4, "out_features": 4}},
+            {"type": "SoftFold", "params": {"width": 4, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_8x_softfold_has_stretch": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 7.9}},
+            {"type": "SoftFold", "params": {"width": 7.9, "has_stretch": true}},
+            {"type": "Linear", "params": {"in_features": 7.9, "out_features": 7.9}},
+            {"type": "SoftFold", "params": {"width": 7.9, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_15x_softfold_has_stretch": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 15}},
+            {"type": "SoftFold", "params": {"width": 15, "has_stretch": true}},
+            {"type": "Linear", "params": {"in_features": 15, "out_features": 15}},
+            {"type": "SoftFold", "params": {"width": 15, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_16x_softfold_has_stretch": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 15.8}},
+            {"type": "SoftFold", "params": {"width": 15.8, "has_stretch": true}},
+            {"type": "Linear", "params": {"in_features": 15.8, "out_features": 15.8}},
+            {"type": "SoftFold", "params": {"width": 15.8, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
     "softfold_double_linear_double_softfold_double_has_stretch": {
         "string": ["SoftFold", "Linear", "SoftFold"], 
         "structure": [
@@ -51,17 +95,6 @@
         "learning_rate": 0.001, 
         "repeat": 3
     },
-    "two_hidden_layer_4x_softfold_has_stretch": {
-        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
-        "structure": [
-            {"type": "Linear", "params": {"in_features": 1, "out_features": 4}},
-            {"type": "SoftFold", "params": {"width": 4, "has_stretch": true}},
-            {"type": "Linear", "params": {"in_features": 4, "out_features": 4}},
-            {"type": "SoftFold", "params": {"width": 4, "has_stretch": true}}
-        ], 
-        "learning_rate": 0.001, 
-        "repeat": 3
-    },
     "two_hidden_layer_4x_fold_has_stretch": {
         "string": ["Linear", "Fold", "Linear", "Fold"], 
         "structure": [
@@ -69,6 +102,24 @@
             {"type": "Fold", "params": {"width": 4, "leak": 0.05, "has_stretch": true}},
             {"type": "Linear", "params": {"in_features": 4, "out_features": 4}},
             {"type": "Fold", "params": {"width": 4, "leak": 0.05, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "fold_then_linear": {
+        "string": ["SoftFold", "Linear"], 
+        "structure": [
+            {"type": "SoftFold", "params": {"width": 2, "has_stretch": true}},
+            {"type": "Linear", "params": {"in_features": 2, "out_features": 2}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "linear_then_fold": {
+        "string": ["Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 2}},
+            {"type": "SoftFold", "params": {"width": 2, "has_stretch": true}}
         ], 
         "learning_rate": 0.001, 
         "repeat": 3
