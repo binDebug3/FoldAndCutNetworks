@@ -321,7 +321,7 @@ def update_architecture(data:list, input_size:int) -> dict:
         for param, value in layer["params"].items():
             if param in {'width', 'in_features', 'out_features'}:
                 if isinstance(value, (int, float)):
-                    layer["params"][param] = int(value * input_size)
+                    layer["params"][param] = int(np.round(value * input_size))
         if layer["type"] == "Fold":
             layer["params"]["leak"] = 0.
     return data
