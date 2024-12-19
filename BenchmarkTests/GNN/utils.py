@@ -170,7 +170,8 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
                     lr = scheduler.optimizer.param_groups[0]['lr']
                     train(train_loader, model, ds_name, optimizer, device)
                     val_acc = test(val_loader, model, device)
-                    print(f"Epoch {epoch}; Validation accuracy: {val_acc}")
+                    if epoch % 10 == 0:
+                        print(f"Epoch {epoch}; Validation accuracy: {val_acc}; Fold: {fold}")
                     scheduler.step(val_acc)
 
                     if val_acc > best_val_acc:

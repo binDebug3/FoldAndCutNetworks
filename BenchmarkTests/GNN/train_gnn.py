@@ -13,7 +13,7 @@ from utils import gnn_evaluation
 
 
 
-def main(dataset:str, fold=False, layers=[1], hidden=[32]):
+def main(dataset:str, fold=False, layers=[2], hidden=[32]):
     """
     Test graph neural networks that use standard MLPs against ones that use fold layers.
     
