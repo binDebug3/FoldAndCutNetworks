@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 import json
 import numpy as np
@@ -190,16 +191,18 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
             experiment_report["Parameters"] = num_params
 
             # Save to a JSON file
+            file_index = 0
             if fold:
                 fold_style = "Fold" 
             else:
                 fold_style = "NoFold"
-            try:
-                with open(f"BenchmarkTests/GNN/experiments/{ds_name}_{fold_style}.json", "w") as json_file:
-                    json.dump(data, json_file, indent=4)
-            except FileNotFoundError:
-                with open(f"{ds_name}_{fold_style}.json", "w") as json_file:
-                    json.dump(experiment_report, json_file, indent=4)
+            while True: # index to avoid overwriting files
+                file_name = f"BenchmarkTests/GNN/experiments/{ds_name}_{fold_style}_{file_index}.json"
+                if not os.path.exists(file_name):
+                    with open(file_name, "w") as json_file:
+                        json.dump(experiment_report, json_file, indent=4)
+                    break
+                file_index += 1
 
     if all_std:
         return np.array(test_accuracies_all)
