@@ -1,21 +1,25 @@
-from BenchmarkTests.GNN.custom_conv_layers import GCNFoldConv, SAGEFoldConv, GATFoldConv, GATv2FoldConv
+from custom_conv_layers import GCNFoldConv, SAGEFoldConv, GATFoldConv, GATv2FoldConv
 from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN
 from torch_geometric.nn.conv import MessagePassing, GINConv
 from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
 from torch_geometric.nn.pool import global_mean_pool, global_max_pool
-from BenchmarkTests.experimenter import get_model
+from experimenter import get_model
 import torch.nn as nn
 
-class FoldGCN(GCN) :
+### Graph Convolutional Network classes ###
+
+class FoldGCN(GCN):
+    """
+    Adjusted Graph Convolutional Network model that uses folding layers. Takes
+    some unnecessary parameters to correctly initialize parent class.
+    """
     def __init__(
         self,
         in_channels: int,
         hidden_channels: int,
         num_layers: int,
-        num_folds: int,
-        dim_increase: List[float],
-        has_stretch: bool,
         out_channels: Optional[int] = None,
+        has_stretch: bool = False,
         crease: Optional[float] = None,
         dropout: float = 0.0,
         act: Union[str, Callable, None] = "relu",
@@ -26,7 +30,9 @@ class FoldGCN(GCN) :
         jk: Optional[str] = None,
         **kwargs,
     ):
-        super.__init__(
+        self.has_stretch = has_stretch
+        self.crease = crease
+        super().__init__(
             in_channels=in_channels,
             hidden_channels=hidden_channels,
             num_layers=num_layers,
@@ -40,24 +46,51 @@ class FoldGCN(GCN) :
             jk=jk,
             **kwargs
         )
-        self.num_folds = num_folds
-        self.dim_increase = dim_increase
-        self.has_stretch = has_stretch
-        self.crease = crease
-    def init_conv(self, in_channels: int, out_channels: int,
-                  **kwargs) -> MessagePassing:
-        return GCNFoldConv(in_channels, out_channels, self.num_folds, 
-                           self.dim_increase, self.has_stretch, 
-                           crease=self.crease, **kwargs)
+    def init_conv(self, in_channels: int, hidden_channels: int, **kwargs) -> MessagePassing:
+        return GCNFoldConv(in_channels, hidden_channels, self.num_layers, self.out_channels, self.has_stretch, crease=self.crease, **kwargs)
 
+class GCNNetwork(nn.Module) :
+    """
+    Graph Convolutional Network that either utilizes the standard GCN model from torch_geometric.nn.models
+    or our custom FoldGCN model depending on the 'fold' parameter. Supports testing various datasets, 
+    hidden layer sizes, and number of layers.
+    """
+    def __init__(self, in_channels, hidden_channels=32, num_layers=1, num_classes=2, graph_level_task:bool=False, fold=False):
+        super(GCNNetwork, self).__init__()
+        # Check prediction task
+        if graph_level_task:
+            # Check model to use
+            if fold:
+                self.gcn = FoldGCN(in_channels, hidden_channels, num_layers)
+            else:
+                self.gcn = GCN(in_channels, hidden_channels, num_layers)
+            self.fc = nn.Linear(hidden_channels, num_classes)
+        else: 
+            # Check model to use
+            if fold:
+                self.gcn = FoldGCN(in_channels, hidden_channels=hidden_channels, num_layers=num_layers, out_channels=num_classes)
+            else:
+                self.gcn = GCN(in_channels, hidden_channels, num_layers, out_channels=num_classes)
+        self.graph_level_task = graph_level_task
+    
+    def forward(self, batch):
+        x = self.gcn(batch.x, batch.edge_index)
+        if self.graph_level_task:
+            x = global_max_pool(x, batch.batch)
+            x = self.fc(x)
+        return x
+    
 
-
+### Graph Sample and Aggregate classes ###
 
 class FoldGraphSAGE(GraphSAGE):
     def init_conv(self, in_channels: Union[int, Tuple[int, int]],
                   out_channels: int, **kwargs) -> MessagePassing:
         return SAGEFoldConv(in_channels, out_channels, **kwargs)
     
+
+### Graph Isomorphism Network classes ###
+
 class FoldGIN(GIN):
     def __init__(
         self,
@@ -133,6 +166,8 @@ class FoldGINNetwork(nn.Module) :
             x = self.fc(x)
         return x
 
+
+### Graph Attention Network classes ###
     
 class FoldGAT(GAT) :
     def init_conv(self, in_channels: Union[int, Tuple[int, int]],

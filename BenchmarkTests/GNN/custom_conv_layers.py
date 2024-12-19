@@ -1,6 +1,6 @@
 from torch_geometric.nn.conv import GCNConv, SAGEConv, GraphConv, GATConv, GATv2Conv, TransformerConv
 from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
-from BenchmarkTests.experimenter import get_model
+from experimenter import get_model
 from models.folds import SoftFold
 import torch.nn as nn
 
@@ -8,10 +8,10 @@ class GCNFoldConv(GCNConv) :
     def __init__(
         self,
         in_channels: int,
+        hidden_channels: int,
+        num_layers: int,
         out_channels: int,
-        num_folds: int,
-        dim_increase: List[float],
-        has_stretch: bool,
+        has_stretch: bool = False,
         crease: Optional[float] = None,
         improved: bool = False,
         cached: bool = False,
@@ -32,10 +32,16 @@ class GCNFoldConv(GCNConv) :
         )
         if out_channels >= in_channels :
             del self.lin
-            self.lin = nn.Sequential()
-            for layer in num_folds :
-                self.lin.append(SoftFold(int(round((1-dim_increase[layer])*in_channels + dim_increase[layer]*out_channels)), 
-                                         crease=crease, has_stretch=has_stretch))
+
+            # Initialize the repeated blocks
+            layers = []
+            for i in range(num_layers):
+                layers.append(nn.Linear(in_channels if i == 0 else hidden_channels, hidden_channels))
+                layers.append(nn.ReLU())
+                layers.append(SoftFold(hidden_channels, crease=crease, has_stretch=has_stretch))
+            
+            # Combine all layers into a sequential block
+            self.lin = nn.Sequential(*layers)
             
 
 class SAGEFoldConv(SAGEConv):
