@@ -9,7 +9,7 @@ from models.folds import Fold, SoftFold
 
 #################################### Dynamic Origami Model ####################################
 class DynamicOrigami(nn.Module):
-    def __init__(self, architecture, num_classes):
+    def __init__(self, architecture, num_classes, no_cut=False, no_relu=False):
         """
         This function initializes the Dynamic Origami model
         Parameters:
@@ -40,7 +40,8 @@ class DynamicOrigami(nn.Module):
                         self.layers.append(SoftFold(**params))
                     elif layer_type == 'Linear':
                         self.layers.append(nn.Linear(**params))
-                        self.layers.append(nn.ReLU())
+                        if not no_relu :
+                            self.layers.append(nn.ReLU())
                 
                 # Get the width of the penultimate layer and add a linear layer to the output
                 penultimate_layer = self.architecture[-1]
@@ -57,8 +58,9 @@ class DynamicOrigami(nn.Module):
                 raise KeyError(f"Control case must have type(self.architecture[0]) = int not {type(self.architecture[0])} ({self.architecture[0]})")
             
             # Define the cut layer and append it to the layers
-            cut = nn.Linear(in_features, self.num_classes)
-            self.layers.append(cut)
+            if not no_cut :
+                cut = nn.Linear(in_features, self.num_classes)
+                self.layers.append(cut)
             
         except:
             print(f"--KeyError--\nVariable 'architecture' must be in the form of:\n{self.architecture_example}\n not {self.architecture}")

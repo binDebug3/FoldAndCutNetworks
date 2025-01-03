@@ -9,3 +9,9 @@ jeffutils
 kaleido
 plotly
 wandb
+# for RL experiments 
+stable-baselines3[extra] 
+gymnasium[mujoco]
+fire
+# for GNN experiments
+torch_geometric
