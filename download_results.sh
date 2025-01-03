@@ -21,13 +21,13 @@ else
     ZIPNAME=$2
 fi
 
-REMOTE_PATH="/home/$NETID/groups/grp_fold/auto_scripts/$ZIPNAME_archive.zip.tar.gz"
+REMOTE_PATH="/home/$NETID/groups/grp_fold/auto_scripts/${ZIPNAME}_archive.zip.tar.gz"
 
 scp "$NETID@ssh.rc.byu.edu:$REMOTE_PATH" data/
 
 # unzip the file
-tar -xzf data/$ZIPNAME_archive.zip.tar.gz -C data/
-rm data/$ZIPNAME_archive.zip.tar.gz
+# tar -xzf data/$ZIPNAME_archive.zip.tar.gz -C data/
+# rm data/$ZIPNAME_archive.zip.tar.gz
 
 echo "Zip file has been successfully downloaded to the 'data' directory and unzipped."
 

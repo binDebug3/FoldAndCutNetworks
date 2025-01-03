@@ -87,6 +87,36 @@ class DynamicOrigami(nn.Module):
 
 
 #################################### Testing Networks ####################################
+class OrigamiToy2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.f1 = Fold(2)
+        self.f2 = Fold(2)
+        self.f3 = Fold(2)
+        self.f4 = Fold(2)
+        self.cut = nn.Linear(2, 2)
+        
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
+        """
+        This function defines the forward pass of the model
+        Parameters:
+            x: (torch.Tensor) - The input tensor to the model
+        Returns:
+            x: (torch.Tensor) - The output tensor from the model
+        """
+        # flatten the input if it is not already
+        if x.dim() > 2:
+            x = x.view(x.shape[0], -1)
+            
+        # Pass the input through the layers
+        x = self.f1(x)
+        x = self.f2(x)
+        x = self.f3(x)
+        x = self.f4(x)
+        x = self.cut(x)
+        return x
+
+
 class OrigamiControl0(nn.Module):
     def __init__(self):
         super().__init__()

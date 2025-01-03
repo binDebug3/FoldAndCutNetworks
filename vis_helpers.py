@@ -72,70 +72,189 @@ def idraw_fold(hyperplane, outx, outy, color='blue', name=None):
         )
 
 
-def plot_folds(model, layer_index=0, use_plotly=False):
+def plot_folds(model, layers:list, use_plotly=False):
     """
     This function plots the folds of a specific layer of the model.
     Parameters:
-        X (np.ndarray) - The input data
-        y (np.ndarray) - The labels
-        layer_index (int) - The index of the layer to plot
+        model (OrigamiNetwork) - The model to plot
+        layers (list) - The list of layers to plot
         use_plotly (bool) - Whether to use Plotly for plotting
     """
-    # Ensure X and y are tensors on the correct device
-    # X = torch.tensor(X, dtype=torch.float32).to(model.device)
-    # y = torch.tensor(y, dtype=torch.long).to(model.device)
-    X = model.X
-    y = model.y
-    X = X.clone().detach().to(model.device) if isinstance(X, torch.Tensor) \
-        else torch.tensor(X, dtype=torch.float32).to(model.device)
-    y = y.clone().detach().to(model.device) if isinstance(y, torch.Tensor) \
-        else torch.tensor(y, dtype=torch.long).to(model.device)
+    plt.figure(figsize=(6, 5), dpi=120)
+    n = len(layers)
+    for layer_index in range(layers+1):
+
+        # Ensure X and y are tensors on the correct device
+        # X = torch.tensor(X, dtype=torch.float32).to(model.device)
+        # y = torch.tensor(y, dtype=torch.long).to(model.device)
+        X = model.X
+        y = model.y
+        X = X.clone().detach().to(model.device) if isinstance(X, torch.Tensor) \
+            else torch.tensor(X, dtype=torch.float32).to(model.device)
+        y = y.clone().detach().to(model.device) if isinstance(y, torch.Tensor) \
+            else torch.tensor(y, dtype=torch.long).to(model.device)
 
 
-    # Forward pass to get intermediate outputs
-    with torch.no_grad():
-        logits, outputs = model.forward(X, return_intermediate=True)
+        # Forward pass to get intermediate outputs
+        with torch.no_grad():
+            logits, outputs = model.forward(X, return_intermediate=True)
 
-    # Get the data after the specified layer
-    Z = outputs[layer_index]
-    Z = Z.detach().cpu().numpy()
-    y = y.detach().cpu().numpy()
+        # Get the data after the specified layer
+        Z = outputs[layer_index]
+        Z = Z.detach().cpu().numpy()
+        y = y.detach().cpu().numpy()
 
-    # Get the fold vector
-    if layer_index != model.layers:
-        hyperplane = model.fold_layers[layer_index].n.detach().cpu().numpy()
-
-    # Extract the two dimensions to plot
-    if Z.shape[1] >= 2:
-        outx = Z[:, 0]
-        outy = Z[:, 1]
-    else:
-        raise ValueError("Data has less than 2 dimensions after folding.")
-
-    if use_plotly:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', marker=dict(color=y), name='Data'))
+        # Get the fold vector
         if layer_index != model.layers:
-            fold_trace = idraw_fold(hyperplane, outx, outy, color='red', name='Fold')
-        fig.add_trace(fold_trace)
-        fig.update_layout(title=f'Layer {layer_index} Fold Visualization', xaxis_title='Feature 1', yaxis_title='Feature 2')
-        fig.show()
-    else:
-        # Create a Matplotlib plot
-        plt.figure(figsize=(6, 5), dpi=120)
-        plt.scatter(outx, outy, c=y, cmap='viridis', label='Data')
+            hyperplane = model.fold_layers[layer_index].n.detach().cpu().numpy()
 
-        # Draw the fold (hyperplane)
-        if layer_index != model.layers:
-            ph = ", ".join([str(round(h, 2)) for h in hyperplane])
-            draw_fold(hyperplane, outx, outy, color='red', name='Fold')
-            plt.title(f'Layer {layer_index} [{ph}] Fold Visualization')
+        # Extract the two dimensions to plot
+        if Z.shape[1] >= 2:
+            outx = Z[:, 0]
+            outy = Z[:, 1]
         else:
-            plt.title("Output Before Softmax")
-        plt.xlabel('Feature 1')
-        plt.ylabel('Feature 2')
+            raise ValueError("Data has less than 2 dimensions after folding.")
+
+        if use_plotly:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=outx, y=outy, mode='markers', marker=dict(color=y), name='Data'))
+            if layer_index != model.layers:
+                fold_trace = idraw_fold(hyperplane, outx, outy, color='red', name='Fold')
+            fig.add_trace(fold_trace)
+            fig.update_layout(title=f'Layer {layer_index} Fold Visualization', xaxis_title='Feature 1', yaxis_title='Feature 2')
+            fig.show()
+        else:
+            # Create a Matplotlib plot
+            plt.subplot(n, 1, layer_index + 1)
+            plt.scatter(outx, outy, c=y, cmap='viridis', label='Data')
+
+            # Draw the fold (hyperplane)
+            if layer_index != model.layers:
+                ph = ", ".join([str(round(h, 2)) for h in hyperplane])
+                draw_fold(hyperplane, outx, outy, color='red', name='Fold')
+                plt.title(f'Layer {layer_index} [{ph}] Fold Visualization')
+            else:
+                plt.title("Output Before Softmax")
+            plt.xlabel('Feature 1')
+            plt.ylabel('Feature 2')
         plt.legend()
         plt.show()
+        
+
+def plot_folds_icml(model, layers, title="Toy Problem", figsize=(16, 4), dpi=300):
+    """
+    Plots a horizontal row of scatter plots representing different layers of a neural network model.
+
+    Parameters:
+        model (OrigamiNetwork): The model to plot.
+        layers (list): List of layer indices to visualize.
+        figsize (tuple): Figure size (width, height) in inches.
+        dpi (int): Resolution of the figure in dots per inch.
+    """
+    n = len(layers)
+    fig, axes = plt.subplots(1, n, figsize=figsize, dpi=dpi)
+
+    # Ensure X and y are on the correct device
+    X = model.X
+    y = model.y
+    X = X.clone().detach().to(model.device) if isinstance(X, torch.Tensor) else torch.tensor(X, dtype=torch.float32).to(model.device)
+    y = y.clone().detach().to(model.device) if isinstance(y, torch.Tensor) else torch.tensor(y, dtype=torch.long).to(model.device)
+
+    with torch.no_grad():
+        _, outputs = model.forward(X, return_intermediate=True)
+
+    for i, layer_index in enumerate(layers):
+        Z = outputs[layer_index].detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy().astype(int) + 1
+
+        if Z.shape[1] < 2:
+            raise ValueError(f"Layer {layer_index} output has less than 2 dimensions for plotting.")
+        outx, outy = Z[:, 0], Z[:, 1]
+        ax = axes[i] if n > 1 else axes
+
+        # Scatter plot
+        scatter = ax.scatter(outx, outy, c=y_np, cmap='winter', alpha=0.9, s=15, label="Data")
+
+        # Add hyperplane (if applicable)
+        if layer_index != len(model.fold_layers):
+            hyperplane = model.fold_layers[layer_index].n.detach().cpu().numpy()
+            x_range = np.linspace(outx.min(), outx.max(), 100)
+            y_range = -(hyperplane[0] * x_range) / hyperplane[1]  # Assuming 2D hyperplane
+            # y_range = np.clip(y_range, outy.min(), outy.max())  # Clip to scatter point range
+            # set points out of range to NA
+            y_range = np.where((y_range > outy.min()) & (y_range < outy.max()), y_range, np.nan)
+            ax.plot(x_range, y_range, color='red', linewidth=3, label='Fold')
+
+        # Title and labels
+        ax.set_title(f"Layer {layer_index}", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Feature 1", fontsize=10, fontweight='bold')
+        ax.set_ylabel("Feature 2", fontsize=10, fontweight='bold')
+        ax.grid(True, linestyle='--', alpha=0.5)
+
+    # Legend
+    fig.legend(['Data', 'Fold'], loc='center right', fontsize=10)
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    # end
+    plt.savefig(f"paper/images/toy_{title.lower()}.png", format="png", dpi=dpi)
+    plt.show()
+    
+
+def plot_star_icml(model, x, y, layers, title="Toy Problem", figsize=(16, 4), dpi=300):
+    """
+    Plots a horizontal row of scatter plots representing different layers of a neural network model.
+
+    Parameters:
+        model (OrigamiNetwork): The model to plot.
+        layers (list): List of layer indices to visualize.
+        figsize (tuple): Figure size (width, height) in inches.
+        dpi (int): Resolution of the figure in dots per inch.
+    """
+    n = len(layers)
+    fig, axes = plt.subplots(1, n, figsize=figsize, dpi=dpi)
+    
+    # convert x and y to tensors
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    X = torch.tensor(x, dtype=torch.float32).to(device)
+    y = torch.tensor(y, dtype=torch.long).to(device)
+    
+    folds = [model.f1, model.f2, model.f3, model.f4]
+    for i, fold in enumerate(folds):
+        fold.requires_grad = False
+        X = fold.forward(X)
+        outx = X[:, 0].detach().cpu().numpy()
+        outy = X[:, 1].detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy().astype(int)
+        ax = axes[i] if n > 1 else axes
+
+        # Scatter plot
+        scatter = ax.scatter(outx, outy, c=y_np, cmap='winter', alpha=0.9, s=15, label="Data")
+
+        # Add hyperplane (if applicable)
+        if i < len(folds) - 1:
+            hyperplane = fold.n.detach().cpu().numpy()
+            x_range = np.linspace(outx.min(), outx.max(), 100)
+            y_range = -(hyperplane[0] * x_range) / hyperplane[1]  # Assuming 2D hyperplane
+            # y_range = np.clip(y_range, outy.min(), outy.max())  # Clip to scatter point range
+            # set points out of range to NA
+            y_range = np.where((y_range > outy.min()) & (y_range < outy.max()), y_range, np.nan)
+            ax.plot(x_range, y_range, color='red', linewidth=3, label='Fold')
+
+        # Title and labels
+        ax.set_title(f"Layer {i}", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Feature 1", fontsize=10, fontweight='bold')
+        ax.set_ylabel("Feature 2", fontsize=10, fontweight='bold')
+        ax.grid(True, linestyle='--', alpha=0.5)
+
+    # Legend
+    fig.legend(['Data', 'Fold'], loc='center right', fontsize=10)
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    # end
+    plt.savefig(f"paper/images/toy_{title.lower()}.png", format="png", dpi=dpi)
+    plt.show()
 
 
 
