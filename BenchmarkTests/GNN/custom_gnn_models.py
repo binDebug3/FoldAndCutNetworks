@@ -3,7 +3,7 @@ from torch_geometric.nn.models import GCN, GraphSAGE, GAT, GIN
 from torch_geometric.nn.conv import MessagePassing, GINConv
 from typing import Any, Callable, Dict, Final, List, Optional, Tuple, Union
 from torch_geometric.nn.pool import global_mean_pool, global_max_pool
-from experimenter import get_model
+from BenchmarkTests.experimenter import get_model
 import torch.nn as nn
 
 ### Graph Convolutional Network classes ###
@@ -11,7 +11,9 @@ import torch.nn as nn
 class FoldGCN(GCN):
     """
     Adjusted Graph Convolutional Network model that uses folding layers. Takes
-    some unnecessary parameters to correctly initialize parent class.
+    some unnecessary parameters to correctly initialize parent class. Note how the ReLU
+    as the default activation is replaced with nn.Identity() since theres a ReLU in each 
+    layer already
     """
     def __init__(
         self,
@@ -22,7 +24,7 @@ class FoldGCN(GCN):
         has_stretch: bool = False,
         crease: Optional[float] = None,
         dropout: float = 0.0,
-        act: Union[str, Callable, None] = "relu",
+        act: Union[str, Callable, None] = nn.Identity(),
         act_first: bool = False,
         act_kwargs: Optional[Dict[str, Any]] = None,
         norm: Union[str, Callable, None] = None,
@@ -47,7 +49,7 @@ class FoldGCN(GCN):
             **kwargs
         )
     def init_conv(self, in_channels: int, hidden_channels: int, **kwargs) -> MessagePassing:
-        return GCNFoldConv(in_channels, hidden_channels, self.num_layers, self.out_channels, self.has_stretch, crease=self.crease, **kwargs)
+        return GCNFoldConv(in_channels, hidden_channels, self.num_layers, self.out_channels, self.has_stretch, **kwargs)
 
 class GCNNetwork(nn.Module) :
     """
@@ -76,7 +78,7 @@ class GCNNetwork(nn.Module) :
     def forward(self, batch):
         x = self.gcn(batch.x, batch.edge_index)
         if self.graph_level_task:
-            x = global_max_pool(x, batch.batch)
+            x = global_max_pool(x.relu(), batch.batch)
             x = self.fc(x)
         return x
     
