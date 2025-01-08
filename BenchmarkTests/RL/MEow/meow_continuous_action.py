@@ -14,16 +14,10 @@ import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
-try:
-    from cleanrl.nf.nets import MLP
-    from cleanrl.nf.transforms import Preprocessing
-    from cleanrl.nf.distributions import ConditionalDiagLinearGaussian
-    from cleanrl.nf.flows import MaskedCondAffineFlow, CondScaling
-except:
-    from nf.nets import MLP
-    from nf.transforms import Preprocessing
-    from nf.distributions import ConditionalDiagLinearGaussian
-    from nf.flows import MaskedCondAffineFlow, CondScaling
+from BenchmarkTests.RL.MEow.nf.nets import MLP
+from BenchmarkTests.RL.MEow.nf.transforms import Preprocessing
+from BenchmarkTests.RL.MEow.nf.distributions import ConditionalDiagLinearGaussian
+from BenchmarkTests.RL.MEow.nf.flows import MaskedCondAffineFlow, CondScaling
 
 @dataclass
 class Args:
@@ -77,6 +71,12 @@ class Args:
     sigma_min: float = -5.0
     deterministic_action: bool = True
 
+    # Our additional arguments
+    fold: bool = False
+    """if True, a soft fold is added after each activation function in all MLPs"""
+    layer_norm: bool = False
+    """Whether or not layer normalization in the MLP in MaskedCondAffineFlow, originally True"""
+
 def evaluate(envs, policy, deterministic=True, device='cuda'):
     with torch.no_grad():
         policy.eval()
@@ -109,12 +109,13 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
     return thunk
 
-def init_Flow(sigma_max, sigma_min, action_sizes, state_sizes):
+def init_Flow(sigma_max, sigma_min, action_sizes, state_sizes, layer_norm, fold):
     init_parameter = "zero"
     init_parameter_flow = "orthogonal"
     dropout_rate_flow = 0.1
     dropout_rate_scale = 0.0
-    layer_norm_flow = True
+    # True in the original implementation, we toggle it since we're unsure how layer norms interact with folds
+    layer_norm_flow = layer_norm 
     layer_norm_scale = False
     hidden_layers = 2
     flow_layers = 2
@@ -124,7 +125,7 @@ def init_Flow(sigma_max, sigma_min, action_sizes, state_sizes):
     # Construct the prior distribution and the linear transformation
     prior_list = [state_sizes] + [hidden_sizes]*hidden_layers + [action_sizes]
     loc = None
-    log_scale = MLP(prior_list, init=init_parameter)
+    log_scale = MLP(prior_list, init=init_parameter, fold=fold)
     q0 = ConditionalDiagLinearGaussian(action_sizes, loc, log_scale, SIGMA_MIN=sigma_min, SIGMA_MAX=sigma_max)
 
     # Construct normalizing flow
@@ -133,15 +134,15 @@ def init_Flow(sigma_max, sigma_min, action_sizes, state_sizes):
     for i in range(flow_layers):
         layers_list = [action_sizes+state_sizes] + [hidden_sizes]*hidden_layers + [action_sizes]
         s = None
-        t1 = MLP(layers_list, init=init_parameter_flow, dropout_rate=dropout_rate_flow, layernorm=layer_norm_flow)
-        t2 = MLP(layers_list, init=init_parameter_flow, dropout_rate=dropout_rate_flow, layernorm=layer_norm_flow)
+        t1 = MLP(layers_list, init=init_parameter_flow, dropout_rate=dropout_rate_flow, layernorm=layer_norm_flow, fold=fold)
+        t2 = MLP(layers_list, init=init_parameter_flow, dropout_rate=dropout_rate_flow, layernorm=layer_norm_flow, fold=fold)
         flows += [MaskedCondAffineFlow(b, t1, s)]
         flows += [MaskedCondAffineFlow(1 - b, t2, s)]
     
     # Construct the reward shifting function
     scale_list = [state_sizes] + [scale_hidden_sizes]*hidden_layers + [1]
-    learnable_scale_1 = MLP(scale_list, init=init_parameter, dropout_rate=dropout_rate_scale, layernorm=layer_norm_scale)
-    learnable_scale_2 = MLP(scale_list, init=init_parameter, dropout_rate=dropout_rate_scale, layernorm=layer_norm_scale)
+    learnable_scale_1 = MLP(scale_list, init=init_parameter, dropout_rate=dropout_rate_scale, layernorm=layer_norm_scale, fold=fold)
+    learnable_scale_2 = MLP(scale_list, init=init_parameter, dropout_rate=dropout_rate_scale, layernorm=layer_norm_scale, fold=fold)
     flows += [CondScaling(learnable_scale_1, learnable_scale_2)]
 
     # Construct the preprocessing layer
@@ -149,12 +150,12 @@ def init_Flow(sigma_max, sigma_min, action_sizes, state_sizes):
     return flows, q0
 
 class FlowPolicy(nn.Module):
-    def __init__(self, alpha, sigma_max, sigma_min, action_sizes, state_sizes, device):
+    def __init__(self, alpha, sigma_max, sigma_min, action_sizes, state_sizes, layer_norm, fold, device):
         super().__init__()
         self.device = device
         self.alpha = alpha
         self.action_shape = action_sizes
-        flows, q0 = init_Flow(sigma_max, sigma_min, action_sizes, state_sizes)
+        flows, q0 = init_Flow(sigma_max, sigma_min, action_sizes, state_sizes, layer_norm, fold)
         self.flows = nn.ModuleList(flows).to(self.device)
         self.prior = q0.to(self.device)
 
@@ -234,11 +235,15 @@ def train(args=None):
         )
     
     if args is not None:
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+        fold = "fold" if args.fold else "no_fold"
+        ln = "ln" if args.layer_norm else "no_ln"
+        run_name = f"{args.env_id}__{fold}__{ln}__{args.seed}__{int(time.time())}"
         writer = SummaryWriter(args.description)
     else:
         args = tyro.cli(Args)
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+        fold = "fold" if args.fold else "no_fold"
+        ln = "ln" if args.layer_norm else "no_ln"
+        run_name = f"{args.env_id}__{fold}__{ln}__{args.seed}__{int(time.time())}"
         args.description = f"runs/{run_name}"
         writer = SummaryWriter(f"runs/{run_name}")
     
@@ -281,12 +286,21 @@ def train(args=None):
                         sigma_min=args.sigma_min, 
                         action_sizes=envs.action_space.shape[1], 
                         state_sizes=envs.observation_space.shape[1],
+                        layer_norm=args.layer_norm,
+                        fold=args.fold,
                         device=device).to(device)
+
+    torch.save(policy, os.path.join('runs', f'{args.env_id}', f'{args.seed}', 'init.pt'))
+
+    return
+
     policy_target = FlowPolicy(alpha=args.alpha, 
                         sigma_max=args.sigma_max, 
                         sigma_min=args.sigma_min, 
                         action_sizes=envs.action_space.shape[1], 
                         state_sizes=envs.observation_space.shape[1],
+                        layer_norm=args.layer_norm,
+                        fold=args.fold,
                         device=device).to(device)
     policy_target.load_state_dict(policy.state_dict())
     q_optimizer = optim.Adam(policy.parameters(), lr=args.q_lr)
@@ -405,6 +419,13 @@ def train(args=None):
 
     envs.close()
     writer.close()
+
+    print(args.env_id)
+    print("fold", args.fold)
+    print("layer_norm", args.layer_norm)
+    print("seed", args.seed)
+    print("best_test_rewards", best_test_rewards)
+    # first 708393, second 708395, third 710602
 
 if __name__ == '__main__':
     train()

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from models.folds import Fold, SoftFold
 
 class MLP(nn.Module):
     """
@@ -11,7 +12,8 @@ class MLP(nn.Module):
         layers,
         dropout_rate=None,
         init=False,
-        layernorm=False
+        layernorm=False,
+        fold=True
     ):
         super().__init__()
         net = nn.ModuleList([])
@@ -35,6 +37,10 @@ class MLP(nn.Module):
             # Dropout
             if dropout_rate is not None:
                 net.append(nn.Dropout(p=dropout_rate))
+
+            # Fold
+            if fold:
+                net.append(SoftFold(layers[k + 1], has_stretch=True))
         
         net.append(nn.Linear(layers[-2], layers[-1]))
 

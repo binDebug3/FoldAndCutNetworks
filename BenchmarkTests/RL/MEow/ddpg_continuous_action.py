@@ -14,6 +14,8 @@ import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
+from models.folds import Fold, SoftFold
+
 
 @dataclass
 class Args:
@@ -65,6 +67,10 @@ class Args:
     """noise clip parameter of the Target Policy Smoothing Regularization"""
     description: str = ""
 
+    # custom arguments
+    fold: bool = False
+    """when True, soft fold layers are added after hidden linear layers in the actor and critic networks"""
+
 def evaluate_(envs, actor, deterministic=True, device='cuda'):
     with torch.no_grad():
         num_envs = envs.unwrapped.num_envs
@@ -97,26 +103,38 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
 # ALGO LOGIC: initialize agent here:
 class QNetwork(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, fold):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 400 - fold)
+        self.fc2 = nn.Linear(400 - fold, 300 - fold)
+        self.fc3 = nn.Linear(300 - fold, 1)
+        self.fold = fold
+        if fold : 
+            self.fold1 = SoftFold(400 - fold, has_stretch=True)
+            self.fold2 = SoftFold(300 - fold, has_stretch=True)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
         x = F.relu(self.fc1(x))
+        if self.fold:
+            x = self.fold1(x)
         x = F.relu(self.fc2(x))
+        if self.fold:
+            x = self.fold2(x)
         x = self.fc3(x)
         return x
 
 
 class Actor(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, fold):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 400 - fold)
+        self.fc2 = nn.Linear(400 - fold, 300 - fold)
+        self.fc_mu = nn.Linear(300 - fold, np.prod(env.single_action_space.shape))
+        self.fold = fold
+        if fold :
+            self.fold1 = SoftFold(400 - fold, has_stretch=True)
+            self.fold2 = SoftFold(300 - fold, has_stretch=True)
         # action rescaling
         self.register_buffer(
             "action_scale", torch.tensor((env.action_space.high - env.action_space.low) / 2.0, dtype=torch.float32)
@@ -127,7 +145,11 @@ class Actor(nn.Module):
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
+        if self.fold:
+            x = self.fold1(x)
         x = F.relu(self.fc2(x))
+        if self.fold:
+            x = self.fold2(x)
         x = torch.tanh(self.fc_mu(x))
         return x * self.action_scale + self.action_bias
 
@@ -147,8 +169,9 @@ def train(args=None):
         writer = SummaryWriter(args.description)
     else:
         args = tyro.cli(Args)
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-        writer = SummaryWriter(f"runs/{run_name}")
+        fold_str = "fold" if args.fold else "no_fold"
+        run_name = f"{args.env_id}__{args.exp_name}__{fold_str}__{args.seed}__{int(time.time())}"
+        writer = SummaryWriter(os.path.join("runs", f"{args.env_id}", f"{args.exp_name}_{fold_str}", f"{run_name}"))
 
     if args.track:
         import wandb
@@ -181,10 +204,10 @@ def train(args=None):
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
     test_envs = gym.make_vec(args.env_id, num_envs=10)
 
-    actor = Actor(envs).to(device)
-    qf1 = QNetwork(envs).to(device)
-    qf1_target = QNetwork(envs).to(device)
-    target_actor = Actor(envs).to(device)
+    actor = Actor(envs, args.fold).to(device)
+    qf1 = QNetwork(envs, args.fold).to(device)
+    qf1_target = QNetwork(envs, args.fold).to(device)
+    target_actor = Actor(envs, args.fold).to(device)
     target_actor.load_state_dict(actor.state_dict())
     qf1_target.load_state_dict(qf1.state_dict())
     q_optimizer = optim.Adam(list(qf1.parameters()), lr=args.learning_rate)
@@ -274,11 +297,11 @@ def train(args=None):
                 writer.add_scalar("Test/return", test_rewards, global_step)
                 if test_rewards>best_test_rewards:
                     best_test_rewards = test_rewards
-                    torch.save(actor, os.path.join(f"{args.description}", 'test_rewards.pt'))
+                    torch.save(actor, os.path.join("runs", f"{args.env_id}", f"{args.exp_name}_{fold_str}", f"{run_name}", 'test_rewards.pt'))
                     print(f"save agent to: {args.description} with best return {best_test_rewards} at step {global_step}")
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = os.path.join("runs", f"{args.env_id}", f"{args.exp_name}_{fold_str}", f"{run_name}", "model.cleanrl_model")
         torch.save((actor.state_dict(), qf1.state_dict()), model_path)
         print(f"model saved to {model_path}")
         from cleanrl_utils.evals.ddpg_eval import evaluate
