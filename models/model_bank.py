@@ -15,6 +15,8 @@ class DynamicOrigami(nn.Module):
         Parameters:
             architecture: (list) - A list of dictionaries that define the architecture of the model
             num_classes: (int) - The number of classes in the dataset
+            no_cut: (bool) - If true, then a linear layer is not automatically added at the end
+            no_relu: (bool) - If true, then ReLU is not added after any linear layers in the module
         """
         super().__init__()
         # Define the architecture
