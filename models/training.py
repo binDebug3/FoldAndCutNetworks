@@ -2,10 +2,11 @@ import torch                    # type: ignore
 import torch.nn as nn           # type: ignore
 import torch.optim as optim     # type: ignore
 import torch.nn.functional as F # type: ignore
-import numpy as np # type: ignore
-from tqdm import tqdm # type: ignore
-from torch.utils.data import TensorDataset, DataLoader # type: ignore
-from matplotlib import pyplot as plt # type: ignore
+import numpy as np              # type: ignore
+from tqdm import tqdm           # type: ignore
+from torch.utils.data import TensorDataset, DataLoader  # type: ignore
+from matplotlib import pyplot as plt                    # type: ignore
+import os
 
 
 
@@ -113,7 +114,19 @@ def validate(net, val_dataloader:torch.utils.data.DataLoader, DEVICE:torch.devic
 
 
 class EarlyStopping:
-    def __init__(self, validate_rate, epochs, train_window = None, val_window = None, default_val_window = .2, default_train_window = .1):
+    def __init__(self, validate_rate:float, epochs:int, 
+                 train_window:int=None, val_window:int=None, 
+                 default_val_window:float=.2, default_train_window:float=.1):
+        """
+        Early stopping class to stop training if the model is not improving.
+        Parameters:
+            validate_rate (float) - The rate at which to validate the model
+            epochs (int) - The number of epochs to train the model
+            train_window (int) - The number of training scores to compare
+            val_window (int) - The number of validation scores to compare
+            default_val_window (float) - The default validation window
+            default_train_window (float) - The default training window
+        """
         # Initialize our hyperparameters
         self.validate_rate = validate_rate
         self.epochs = epochs
@@ -123,9 +136,9 @@ class EarlyStopping:
         self.default_train_window = default_train_window
         
         # Calculate the number of validation steps
-        self.val_steps = epochs // int(validate_rate * epochs)
-        default_val = int(1/self.default_val_window)
-        default_train = int(1/self.default_train_window)
+        self.val_steps = epochs // max(1, int(validate_rate * epochs))
+        default_val = max(1, int(1 / self.default_val_window))
+        default_train = max(1, int(1 / self.default_train_window))
         
         # Calculate the windows if they are none
         if val_window is None:
@@ -139,6 +152,7 @@ class EarlyStopping:
         self.past_train = None
         self.cur_val = None
         self.past_val = None
+
 
     def __call__(self, train_loss, val_loss = None):
         # Check if we have enough train scores to compare
@@ -165,13 +179,17 @@ class EarlyStopping:
                 return
             
 
+
+
 ################################# Training function #################################
+
 def train(model, optimizer:torch.optim.Optimizer, 
           train_dataloader:torch.utils.data.DataLoader, 
           val_dataloader:torch.utils.data.DataLoader, 
           epochs:int=100, DEVICE:torch.device=None, 
           validate_rate:float=0, lr_schedule=None,
-          train_stop_window:int=None,val_stop_window:int=None,
+          train_stop_window:int=None, val_stop_window:int=None,
+          early_stopping_tol:float=0, save_model:bool=False,
           verbose:int=0):
     """
     This function trains the neural network.
@@ -187,6 +205,7 @@ def train(model, optimizer:torch.optim.Optimizer,
         lr_scheduler (LRSchedulerWrapper) - The learning rate scheduler (default: None)
         early_stopping_tol (float) - The tolerance for early stopping (default: 0)
             0 means no early stopping
+        save_model (bool) - Whether to save the model weights with the best validation accuracy (default: False)
         verbose (int) - The verbosity level (default: 0)
     Returns:
         train_losses (list) - The training losses for each epoch
@@ -211,6 +230,7 @@ def train(model, optimizer:torch.optim.Optimizer,
     # Define a loop object to keep track of training and loop through the epochs, also early stopping object
     loop = tqdm(total=epochs, position=0, leave=True, disable=verbose==0)
     early_stopping = EarlyStopping(validate_rate, epochs, train_window = train_stop_window, val_window = val_stop_window)
+    max_val_acc = 0
 
     for i in range(epochs):
         epoch_loss, correct_preds, total_preds = 0, 0, 0
@@ -252,10 +272,13 @@ def train(model, optimizer:torch.optim.Optimizer,
             val_loss, val_accuracy = validate(model, val_dataloader, DEVICE)
             val_losses.append(val_loss)
             val_accuracies.append(val_accuracy)
-        
+            
+            # TODO: save model architecture and weights for model checkpointing
+
         # Check for early stopping
+        # TODO: stops too early
         early_stopping(train_losses, val_losses)
-        if early_stopping.early_stop:
+        if early_stopping.early_stop and early_stopping_tol > 0:
             if verbose > 0:
                 print(f"Early stopping at epoch {i+1}")
             break

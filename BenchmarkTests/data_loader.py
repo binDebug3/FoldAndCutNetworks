@@ -34,9 +34,10 @@ except ImportError:
     from BenchmarkTests import cnn_bench
 
 print("\nWorking Directory:", os.getcwd(), "\n")
+arch_file_name = "ablation_archs"
 onsup = 'SLURM_JOB_ID' in os.environ
 config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
-architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+architecture_path = f"../BenchmarkTests/{arch_file_name}.json" if onsup else f"{arch_file_name}.json"
 data_path = "../data" if onsup else "data"
 
 
