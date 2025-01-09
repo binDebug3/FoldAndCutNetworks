@@ -9,7 +9,7 @@ from models.folds import Fold, SoftFold
 
 #################################### Dynamic Origami Model ####################################
 class DynamicOrigami(nn.Module):
-    def __init__(self, architecture, num_classes, no_cut=False, no_relu=False):
+    def __init__(self, architecture, num_classes, no_cut=False, no_relu=False, iknowaboutthecutlayer=False):
         """
         This function initializes the Dynamic Origami model
         Parameters:
@@ -47,7 +47,8 @@ class DynamicOrigami(nn.Module):
                 penultimate_layer = self.architecture[-1]
                 if penultimate_layer['type'] == 'Linear':
                     in_features = penultimate_layer['params']['out_features']
-                    print("Warning: A linear 'cut' layer is already automatically added to the forward pass")
+                    if not iknowaboutthecutlayer:
+                        print("Warning: A linear 'cut' layer is already automatically added to the forward pass")
                 else:
                     in_features = penultimate_layer['params']['width']
 

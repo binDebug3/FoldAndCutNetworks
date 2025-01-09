@@ -7,6 +7,7 @@ import math
 import gzip
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
+from pprint import pprint
 import pdb
 try:
     from jeffutils.utils import stack_trace         # type: ignore
@@ -37,8 +38,9 @@ from models.model_bank import *
 from models.training import *
 
 onsup = 'SLURM_JOB_ID' in os.environ
+arch_file_name = "ablation_archs"
 config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
-architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+architecture_path = f"../BenchmarkTests/{arch_file_name}.json" if onsup else f"{arch_file_name}.json"
 data_path = "../data" if onsup else "../data"
 
 
@@ -86,7 +88,7 @@ def build_dir(dataset_name:str, model_name:str):
     Returns:
         str: directory
     """
-    path = f"../data/results/{dataset_name}/{model_name}/npy_files"
+    path = f"results/{dataset_name}/{model_name}/npy_files"
     if onsup:
         path = f"../{path}"
     return path
@@ -535,7 +537,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         outs = len(np.unique(y_train))
         
         # train the model and get performance results
-        if "Fold" in model_name or "Control" == model_name:
+        if "MLARCH" not in model_name:
             model, lr = get_model(model_name, input_size=X_train.shape[1], output_size=outs)
             train_losses, val_losses, train_accuracies, val_accuracies, train_time, inference_speed, num_parameters = \
                 run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, 
@@ -581,7 +583,13 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     results_std = {}
     for info in info_list:
         # compute means and stds of the data for each metric
-        values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
+        try:
+            values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
+        except ValueError as e:
+            print("info:", info)
+            pprint(results_dict[model_name])
+            print("info:", info)
+            raise e
         results_mean[info] = np.mean(values, axis=0)
         results_std[info] = np.std(values, axis=0)
 
