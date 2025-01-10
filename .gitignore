@@ -16,5 +16,5 @@ BenchmarkTests/RL/logs/*
 *.sh
 BenchmarkTests/GNN/datasets/*
 BenchmarkTests/GNN/experiments/*
-runs/*
+BenchmarkTests/RL/runs/*
 *.npy
