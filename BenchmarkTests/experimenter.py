@@ -18,6 +18,7 @@ except ImportError:
 import matplotlib.pyplot as plt                     # type: ignore
 import plotly.graph_objects as go                   # type: ignore
 from plotly.subplots import make_subplots           # type: ignore
+from matplotlib.ticker import ScalarFormatter       # type: ignore
 
 # ml imports
 from sklearn.metrics import accuracy_score          # type: ignore
@@ -39,8 +40,8 @@ from models.training import *
 
 onsup = 'SLURM_JOB_ID' in os.environ
 arch_file_name = "ablation_archs"
-config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
-architecture_path = f"../BenchmarkTests/{arch_file_name}.json" if onsup else f"{arch_file_name}.json"
+config_path = "../BenchmarkTests/config.json" if onsup else "BenchmarkTests/config.json"
+architecture_path = f"../BenchmarkTests/{arch_file_name}.json" if onsup else f"BenchmarkTests/{arch_file_name}.json"
 data_path = "../data" if onsup else "../data"
 
 
@@ -53,15 +54,13 @@ class InvalidModelError(ValueError):
 def get_last_file(dir:str, partial_name:str, insert:str="_d", file_type:str="npy"):
     """
     Get the last file in a directory matching the partial name
-
     Parameters:
-    partial_name (str): partial name of the file
-    dir (str): directory to search in
-    insert (str): string to insert before the datetime
-    file_type (str): type of file to search for
-
+        partial_name (str): partial name of the file
+        dir (str): directory to search in
+        insert (str): string to insert before the datetime
+        file_type (str): type of file to search for
     Returns:
-    str: path to the last file
+        path (str): path to the last file
     """
     # get all the datetimes
     date_format = json.load(open(config_path)).get("date_format")
@@ -91,6 +90,8 @@ def build_dir(dataset_name:str, model_name:str):
     path = f"results/{dataset_name}/{model_name}/npy_files"
     if onsup:
         path = f"../{path}"
+    else:
+        path = f"data/{path}"
     return path
 
 
@@ -637,9 +638,11 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
         sup_date (bool): Whether the data is downloaded from the supercomputer
         verbose (int): the verbosity level
     Returns:
-        benchmarking (dict): dictionary containing the benchmarking results
+        train_benchmarking (dict): dictionary containing the benchmarking results
+        val_benchmarking (dict): dictionary containing the validation benchmarking results
     """
     possible_architectures = list(json.load(open(architecture_path)).keys())
+    progress = tqdm(total=len(possible_architectures), position=0, leave=True, disable=verbose!=0)
     for model_name in possible_architectures:
         # skip checking
         if model_name in train_benchmarking.keys():
@@ -654,6 +657,9 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
             continue
         
 
+        if verbose == 0:
+            progress.set_description(f"Loading '{model_name.rjust(25)}'")
+            progress.update(1)
         if verbose > 0:
             print(f"Loading '{model_name}' data from '{folder}'")
 
@@ -709,9 +715,10 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
         # add additional key and values to the benchmarking dictionary
         val_benchmarking[model_name]['mean'] = mean_metric_dict
         val_benchmarking[model_name]['std'] = std_metric_dict
+    progress.close()
     
     # print(train_benchmarking)
-    return train_benchmarking,val_benchmarking
+    return train_benchmarking, val_benchmarking
 
 
 def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
@@ -839,6 +846,109 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
                 os.remove(replace_path)
         fig.write_image(os.path.join(fig_path, fig_name))
     fig.show()
+
+
+def save_figure(file_path:str="images/ablation_study.png", save_fig:bool=True, replace_fig:bool=False) -> None:
+    if save_fig:
+        if os.path.exists(file_path):
+            last_char = file_path[-5]
+            if last_char.isdigit():
+                last_char = str(int(last_char) + 1)
+            else:
+                last_char = "1"
+            file_path = file_path[:-5] + last_char + file_path[-4:]
+        plt.savefig(file_path)
+
+
+def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fontsize=15,
+                  errors:str='raise', verbose:int=0) -> None:
+    """
+    This function plots the ablation study results
+    Parameters:
+        repeat (int): number of times to repeat the experiment
+        save_fig (bool): whether to save the figure
+        replace_fig (bool): whether to replace the old figure
+        fontsize (int): the fontsize of the text
+        errors (str): how to handle errors
+        verbose (int): the verbosity level
+    """
+    assert isinstance(repeat, int), f"repeat must be an integer not {type(repeat)}"
+    assert repeat > 0, f"repeat must be greater than 0 not {repeat}"
+    assert isinstance(save_fig, bool), f"save_fig must be a boolean not {type(save_fig)}"
+    assert isinstance(replace_fig, bool), f"replace_fig must be a boolean not {type(replace_fig)}"
+    assert isinstance(fontsize, int), f"fontsize must be an integer not {type(fontsize)}"
+    assert isinstance(errors, str), f"errors must be a string not {type(errors)}"
+    assert errors in ["raise", "ignore", "flag"], f"errors must be 'raise', 'ignore', or 'flag' not '{errors}'"
+    assert isinstance(verbose, int), f"verbose must be an integer not {type(verbose)}"
+    assert verbose >= -1, f"verbose must be greater than or equal to -1 not {verbose}"
+    
+    # Get the constants
+    dataset_name_no_matter_qqq = "covtype"
+    train_metrics = ["acc", "time"]
+    val_metrics = []
+    
+    # Load the data
+    train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name_no_matter_qqq, 
+                                                           repeat=repeat, verbose=verbose, 
+                                                           train_metrics=train_metrics, val_metrics=val_metrics)
+    
+    row_names = ["Training Accuracy", "Training Time"]
+    metrics = train_metrics + val_metrics
+    row_count = len(row_names)
+    assert row_count == len(metrics), f"row_count ({row_count}) must be equal to the number of metrics ({len(metrics)})"
+    col_names = list(set([model.split("_")[1] for model in list(train_benchmarking.keys())]))
+    model_types = list(set([model.split("_")[0] for model in list(train_benchmarking.keys())]))
+    col_count = len(col_names)
+    model_count = len(model_types)
+    
+    def get_end_vals(model_names, metric, stat):
+        # this is kinda janky sorry
+        array = [train_benchmarking[model_name][stat][metric][-1] if \
+                                    isinstance(train_benchmarking[model_name][stat][metric], list) else \
+                                        train_benchmarking[model_name][stat][metric]
+                                    for model_name in model_names]
+        if type(array[0]) == np.ndarray:
+            return np.array([arr[-1] for arr in array])
+        return np.array(array)
+    
+    # Create the figure
+    plt.figure(figsize=(col_count*5, row_count*5), dpi=300)
+    cmap = plt.get_cmap('Set1')
+    progress = tqdm(total=row_count*col_count*model_count, position=0, leave=True, disable=verbose!=0, desc="Building Plots")
+    for i, row_name, metric in zip(range(row_count), row_names, metrics):
+        for j, col_name in enumerate(col_names):
+            plt.subplot(row_count, col_count, i*col_count + j + 1)
+            for k, model_type in enumerate(model_types):
+                run_name = f"{model_type}_{col_name}"
+                model_names = [model for model in train_benchmarking.keys() if run_name in model]
+                sizes = [int(key.split("_")[-1]) for key in model_names]
+                means = get_end_vals(model_names, metric, "mean")
+                stds = get_end_vals(model_names, metric, "std")
+                label = model_type # if i + j == 0 else None # only show the label once
+                progress.update()
+                try:
+                    plt.fill_between(sizes, means-stds, means+stds, alpha=.1, color=cmap(k))
+                except:
+                    continue
+                plt.plot(sizes, means, label=label, marker='o', lw=2, color=cmap(k))
+            if i == 0:
+                plt.title(col_name, fontsize=fontsize-2)
+            if i == row_count - 1:
+                plt.xlabel("Data Size", fontsize=fontsize-4)
+            if j == 0:
+                plt.ylabel(row_name, fontsize=fontsize-4)
+            plt.xscale("log")
+            ticks = [int(round(size, -2)) for size in sizes]
+            plt.xticks(ticks, [f"{size/1000}k" for size in ticks])
+            plt.grid(True, linestyle='--', alpha=0.5)
+    progress.close()
+    print("Preparing your figure, please wait 10-15 seconds.")
+    plt.suptitle("Ablation Study Over Data Sizes", fontsize=fontsize+2)
+    plt.legend(loc="center right", fontsize=fontsize-4)
+    plt.tight_layout()
+    save_figure(save_fig=save_fig, replace_fig=replace_fig)
+    plt.show()
+    
     
     
     
@@ -848,7 +958,7 @@ def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
                  train_metrics:list=["loss", "acc", "time", "params"],
                  val_metrics:list=["loss"], 
                  col_names:list= ['Validation Loss','Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
-                 errors:str='raise',verbose:int=0) -> None:
+                 errors:str='raise', verbose:int=0) -> None:
     """
     Plot the benchmarking results
     Parameters:
