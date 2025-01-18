@@ -107,6 +107,9 @@ def build_name(val:bool, info_type:str, iteration):
         str: name of the numpy file
     """
     train = "train" if not val else "val"
+    # prevent inference speed from overwriting train time by renaming it here
+    train = "inference" if info_type == "speed" else train
+    info_type = "time" if info_type == "speed" else info_type
     return f"{train}_{info_type}_i{iteration}"
 
 
@@ -487,7 +490,7 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
             end_time - start_time, inference_speed, num_parameters
 
 
-def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
+def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, start_index:int=0,
                  save_all:bool=True, save_any:bool=True, refresh:bool=True, verbose:int=0):
     """
     Trains a model on the cancer dataset with different data sizes and saves the accuracy and time data.
@@ -502,6 +505,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
             y_test (np.ndarray): The testing labels.
         datetime (str): The current date and time.
         repeat (int): The number of times to repeat the experiment.
+        start_index (int): The index to start the experiment at.
         save_all (bool): Whether to save all the data or just the means and stds
         save_any (bool): Whether to save any data at all
         refresh (bool): Whether to refresh the last file
@@ -522,8 +526,8 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     info_titles = json.load(open(config_path)).get("info_titles")
 
     
-    for i in range(repeat):
-        X_train, y_train = shuffle(X_train, y_train, random_state=i)
+    for rep in range(start_index, start_index + repeat):
+        X_train, y_train = shuffle(X_train, y_train, random_state=rep)
         # if len(np.unique(y_train)) < 2:
         #     raise ValueError("Not enough classes in the training data")
 
@@ -575,8 +579,8 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
                     pdb.set_trace() 
             # save each metric for each iteration
             for j, data, info_type in zip(range(len(metric_list)), metric_list, info_titles):
-                save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh, repeat=repeat)
-        results_dict[model_name][i] = {name: value for name, value in zip(info_list, metric_list)}
+                save_data(data, save_constants, info_type, rep, val=j in [1, 3], refresh=refresh, repeat=repeat)
+        results_dict[model_name][rep] = {name: value for name, value in zip(info_list, metric_list)}
 
 
     # Done benchmarking, calculate means and stds and saving them
@@ -903,7 +907,7 @@ def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fonts
     
     def get_end_vals(model_names, metric, stat):
         # this is kinda janky sorry
-        array = [train_benchmarking[model_name][stat][metric][-1] if \
+        array = [np.mean(train_benchmarking[model_name][stat][metric][-min(len(train_benchmarking[model_name][stat][metric]), 5):]) if \
                                     isinstance(train_benchmarking[model_name][stat][metric], list) else \
                                         train_benchmarking[model_name][stat][metric]
                                     for model_name in model_names]
@@ -934,7 +938,7 @@ def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fonts
             if i == 0:
                 plt.title(col_name, fontsize=fontsize-2)
             if i == row_count - 1:
-                plt.xlabel("Data Size", fontsize=fontsize-4)
+                plt.xlabel("Parameter Count", fontsize=fontsize-4)
             if j == 0:
                 plt.ylabel(row_name, fontsize=fontsize-4)
             plt.xscale("log")
