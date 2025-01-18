@@ -472,7 +472,8 @@ def load_imagenet(astorch:bool=False, random_state:int=None, test_size:float=0.2
 
 
 
-def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=False, return_sizes:bool=False, repeat:int=5, verbose:int=0) -> dict:
+def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=False, return_sizes:bool=False, 
+               repeat:int=5, start_index:int=0, verbose:int=0) -> dict:
     """
     This function tests a model on a dataset.
     Parameters:
@@ -481,6 +482,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
         dataset_name (str): default=None. The name of the dataset to test on. If none, test on all datasets.
         return_sizes (bool): default=False. If True, return the sample sizes used.
         repeat (int): default=5. The number of times to repeat the test.
+        start_index (int): default=0. The index to restart the ablation study at.
         verbose (int): default=0. If 1, print the shape of the data and the target.
     Returns:
         model_results (dict): The results of the benchmark.
@@ -537,7 +539,7 @@ def test_model(model_name, date_time:str, dataset_name:str=None, astorch:bool=Fa
         experiment_info = (dataset_name, sample_sizes, X_train, y_train, X_test, y_test)
         
         # run benchmark
-        model_results = benchmark_ml(model_name, experiment_info, date_time, repeat=repeat, verbose=verbose)
+        model_results = benchmark_ml(model_name, experiment_info, date_time, repeat=repeat, start_index=start_index, verbose=verbose)
         results[dataset] = model_results
     
     
