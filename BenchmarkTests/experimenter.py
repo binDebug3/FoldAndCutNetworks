@@ -680,8 +680,9 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
                 metric_list.append(train_data)
             
             # Get the composite array
+            metric_list = [data for data in metric_list if data is not None]
             composite_array = np.array(metric_list)
-            mean = np.mean(composite_array, axis=0)
+            mean = np.nanmean(composite_array, axis=0, )
             if do_std:
                 std = np.std(composite_array, axis=0)
             else:
