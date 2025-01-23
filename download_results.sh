@@ -41,6 +41,7 @@ else
 fi
 
 # unzip the file
+echo "Unzipping the file..."
 tar -xzf data/${ZIPNAME}_archive.zip.tar.gz -C data/
 
 rm data/${ZIPNAME}_archive.zip.tar.gz
