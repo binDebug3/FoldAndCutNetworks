@@ -17,4 +17,5 @@ BenchmarkTests/RL/logs/*
 BenchmarkTests/GNN/datasets/*
 BenchmarkTests/GNN/experiments/*
 BenchmarkTests/RL/runs/*
+BenchmarkTests/RL/old_runs/*
 *.npy

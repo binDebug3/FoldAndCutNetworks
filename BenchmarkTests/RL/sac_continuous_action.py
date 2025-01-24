@@ -69,6 +69,8 @@ class Args:
     # custom arguments
     fold: bool = False
     """when True, soft fold layers are added to soft q and actor networks"""
+    combo_num: int = 1
+    """number for this particular combo of hyperparameters"""
 
 def evaluate(envs, actor, deterministic=True, device='cuda'):
     with torch.no_grad():
@@ -104,14 +106,13 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 class SoftQNetwork(nn.Module):
     def __init__(self, env, fold):
         super().__init__()
-        hidden_size = 255 if fold else 256 # ensure models with and without folds have close to the same number of parameters
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, 1)
+        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, 1)
         self.fold = fold
         if self.fold:
-            self.fold1 = SoftFold(hidden_size, has_stretch=True)
-            self.fold2 = SoftFold(hidden_size, has_stretch=True)
+            self.fold1 = SoftFold(256, has_stretch=True)
+            self.fold2 = SoftFold(256, has_stretch=True)
 
     def forward(self, x, a):
         x = torch.cat([x, a], 1)
@@ -132,15 +133,14 @@ LOG_STD_MIN = -5
 class Actor(nn.Module):
     def __init__(self, env, fold):
         super().__init__()
-        hidden_size = 255 if fold else 256 # ensure models with and without folds have close to the same number of parameters
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc_mean = nn.Linear(hidden_size, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(hidden_size, np.prod(env.single_action_space.shape))
+        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
         self.fold = fold
         if self.fold:
-            self.fold1 = SoftFold(hidden_size, has_stretch=True)
-            self.fold2 = SoftFold(hidden_size, has_stretch=True)
+            self.fold1 = SoftFold(256, has_stretch=True)
+            self.fold2 = SoftFold(256, has_stretch=True)
 
         # action rescaling
         self.register_buffer(
@@ -196,7 +196,7 @@ def train(args=None):
     else:
         args = tyro.cli(Args)
         fold_str = "_fold" if args.fold else ""
-        run_name = os.path.join(f"{args.env_id}", f"sac{fold_str}", f"{args.seed}")
+        run_name = os.path.join(f"{args.env_id}", f"sac{fold_str}", f"combo_{args.combo_num}_seed_{args.seed}")
         writer = SummaryWriter(os.path.join("BenchmarkTests/RL/runs", run_name))
     
     if args.track:
@@ -363,8 +363,8 @@ def train(args=None):
                 writer.add_scalar("Test/return", test_rewards, global_step)
                 if test_rewards>best_test_rewards:
                     best_test_rewards = test_rewards
-                    torch.save(actor, os.path.join("BenchmarkTests/RL/runs", f"{args.env_id}", f"sac{fold_str}", f"{args.seed}", "test_rewards.pt"))
-                    print(f"save agent to: {os.path.join("BenchmarkTests/RL/runs", f"{args.env_id}", f"sac{fold_str}", f"{args.seed}")} \
+                    torch.save(actor, os.path.join("BenchmarkTests/RL/runs", run_name, "test_rewards.pt"))
+                    print(f"save agent to: {os.path.join("BenchmarkTests/RL/runs", run_name, "test_rewards.pt")} \
                           with best return {best_test_rewards} at step {global_step}")
                 
 

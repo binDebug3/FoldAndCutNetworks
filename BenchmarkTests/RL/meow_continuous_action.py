@@ -74,6 +74,8 @@ class Args:
     # Our additional arguments
     fold: bool = False
     """if True, a soft fold is added after each activation function in all MLPs"""
+    combo_num: int = 1
+    """number for this particular combo of hyperparameters"""
 
 def evaluate(envs, policy, deterministic=True, device='cuda'):
     with torch.no_grad():
@@ -237,7 +239,7 @@ def train(args=None):
     else:
         args = tyro.cli(Args)
         fold_str = "_fold" if args.fold else ""
-        run_name = os.path.join(f"{args.env_id}", f"meow{fold_str}", f"{args.seed}")
+        run_name = os.path.join(f"{args.env_id}", f"meow{fold_str}", f"combo_{args.combo_num}_seed_{args.seed}")
         writer = SummaryWriter(os.path.join("BenchmarkTests/RL/runs", run_name))
     
     if args.track:
@@ -400,8 +402,8 @@ def train(args=None):
                 writer.add_scalar("Steps", global_step, global_step)
                 if test_rewards>best_test_rewards:
                     best_test_rewards = test_rewards
-                    torch.save(policy, os.path.join("BenchmarkTests/RL/runs", f"{args.env_id}", f"meow{fold_str}", f"{args.seed}", 'test_rewards.pt'))
-                    print(f"save agent to: {os.path.join("BenchmarkTests/RL/runs", f"{args.env_id}", f"meow{fold_str}", f"{args.seed}")} \
+                    torch.save(policy, os.path.join("BenchmarkTests/RL/runs", run_name, "test_rewards.pt"))
+                    print(f"save agent to: {os.path.join("BenchmarkTests/RL/runs", run_name, "test_rewards.pt")} \
                           with best return {best_test_rewards} at step {global_step}")
                 
 

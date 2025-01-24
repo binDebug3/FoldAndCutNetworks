@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from BenchmarkTests.RL.MEow.nf import flows
+from BenchmarkTests.RL.nf import flows
 
 class arcTanh(flows.Flow):
     def __init__(self):
