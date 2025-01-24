@@ -7,6 +7,7 @@ import math
 import gzip
 import numpy as np                                  # type: ignore
 from tqdm import tqdm                               # type: ignore
+from pprint import pprint
 import pdb
 try:
     from jeffutils.utils import stack_trace         # type: ignore
@@ -17,6 +18,7 @@ except ImportError:
 import matplotlib.pyplot as plt                     # type: ignore
 import plotly.graph_objects as go                   # type: ignore
 from plotly.subplots import make_subplots           # type: ignore
+from matplotlib.ticker import ScalarFormatter       # type: ignore
 
 # ml imports
 from sklearn.metrics import accuracy_score          # type: ignore
@@ -37,8 +39,9 @@ from models.model_bank import *
 from models.training import *
 
 onsup = 'SLURM_JOB_ID' in os.environ
-config_path = "../BenchmarkTests/config.json" if onsup else "config.json"
-architecture_path = "../BenchmarkTests/architectures.json" if onsup else "architectures.json"
+arch_file_name = "ablation_archs"
+config_path = "../BenchmarkTests/config.json" if onsup else "BenchmarkTests/config.json"
+architecture_path = f"../BenchmarkTests/{arch_file_name}.json" if onsup else f"BenchmarkTests/{arch_file_name}.json"
 data_path = "../data" if onsup else "../data"
 
 
@@ -51,15 +54,13 @@ class InvalidModelError(ValueError):
 def get_last_file(dir:str, partial_name:str, insert:str="_d", file_type:str="npy"):
     """
     Get the last file in a directory matching the partial name
-
     Parameters:
-    partial_name (str): partial name of the file
-    dir (str): directory to search in
-    insert (str): string to insert before the datetime
-    file_type (str): type of file to search for
-
+        partial_name (str): partial name of the file
+        dir (str): directory to search in
+        insert (str): string to insert before the datetime
+        file_type (str): type of file to search for
     Returns:
-    str: path to the last file
+        path (str): path to the last file
     """
     # get all the datetimes
     date_format = json.load(open(config_path)).get("date_format")
@@ -89,6 +90,8 @@ def build_dir(dataset_name:str, model_name:str):
     path = f"results/{dataset_name}/{model_name}/npy_files"
     if onsup:
         path = f"../{path}"
+    else:
+        path = f"data/{path}"
     return path
 
 
@@ -104,6 +107,9 @@ def build_name(val:bool, info_type:str, iteration):
         str: name of the numpy file
     """
     train = "train" if not val else "val"
+    # prevent inference speed from overwriting train time by renaming it here
+    train = "inference" if info_type == "speed" else train
+    info_type = "time" if info_type == "speed" else info_type
     return f"{train}_{info_type}_i{iteration}"
 
 
@@ -484,7 +490,7 @@ def run_deep_learning(model, x_train:np.ndarray, y_train:np.ndarray,
             end_time - start_time, inference_speed, num_parameters
 
 
-def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, 
+def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5, start_index:int=0,
                  save_all:bool=True, save_any:bool=True, refresh:bool=True, verbose:int=0):
     """
     Trains a model on the cancer dataset with different data sizes and saves the accuracy and time data.
@@ -499,6 +505,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
             y_test (np.ndarray): The testing labels.
         datetime (str): The current date and time.
         repeat (int): The number of times to repeat the experiment.
+        start_index (int): The index to start the experiment at.
         save_all (bool): Whether to save all the data or just the means and stds
         save_any (bool): Whether to save any data at all
         refresh (bool): Whether to refresh the last file
@@ -519,13 +526,13 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     info_titles = json.load(open(config_path)).get("info_titles")
 
     
-    for i in range(repeat):
-        X_train, y_train = shuffle(X_train, y_train, random_state=i)
+    for rep in range(start_index, start_index + repeat):
+        X_train, y_train = shuffle(X_train, y_train, random_state=rep)
         # if len(np.unique(y_train)) < 2:
         #     raise ValueError("Not enough classes in the training data")
 
         # set up data sample
-        size = data_sizes[-1]
+        size = data_sizes[-1] if len(data_sizes) > 0 else None
         if size is None or size > len(X_train):
             data_sizes[data_sizes.index(size)] = len(X_train)
             size = len(X_train)
@@ -535,7 +542,7 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
         outs = len(np.unique(y_train))
         
         # train the model and get performance results
-        if "Fold" in model_name or "Control" == model_name:
+        if "MLARCH" not in model_name:
             model, lr = get_model(model_name, input_size=X_train.shape[1], output_size=outs)
             train_losses, val_losses, train_accuracies, val_accuracies, train_time, inference_speed, num_parameters = \
                 run_deep_learning(model, tmp_X_train, tmp_y_train, tmp_X_test, tmp_y_test, 
@@ -556,10 +563,10 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
 
 
         # Done evaluating, now saving data
-        metric_list = [np.array(train_accuracies), 
-                       np.array(val_accuracies), 
-                       np.array(train_losses), 
+        metric_list = [np.array(train_losses), 
                        np.array(val_losses), 
+                       np.array(train_accuracies), 
+                       np.array(val_accuracies), 
                        np.array(train_time), 
                        np.array(inference_speed), 
                        np.array(num_parameters)]
@@ -572,8 +579,8 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
                     pdb.set_trace() 
             # save each metric for each iteration
             for j, data, info_type in zip(range(len(metric_list)), metric_list, info_titles):
-                save_data(data, save_constants, info_type, i, val=j==1, refresh=refresh, repeat=repeat)
-        results_dict[model_name][i] = {name: value for name, value in zip(info_list, metric_list)}
+                save_data(data, save_constants, info_type, rep, val=j in [1, 3], refresh=refresh, repeat=repeat)
+        results_dict[model_name][rep] = {name: value for name, value in zip(info_list, metric_list)}
 
 
     # Done benchmarking, calculate means and stds and saving them
@@ -581,7 +588,13 @@ def benchmark_ml(model_name:str, experiment_info, datetime, repeat:int=5,
     results_std = {}
     for info in info_list:
         # compute means and stds of the data for each metric
-        values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
+        try:
+            values = np.array([results_dict[model_name][i][info] for i in range(repeat)])
+        except ValueError as e:
+            print("info:", info)
+            pprint(results_dict[model_name])
+            print("info:", info)
+            raise e
         results_mean[info] = np.mean(values, axis=0)
         results_std[info] = np.std(values, axis=0)
 
@@ -626,11 +639,14 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
         data_set (str): name of the dataset
         all_data (bool): whether to load all the data or just the means and std
         repeat (int): number of times to repeat the experiment
+        sup_date (bool): Whether the data is downloaded from the supercomputer
         verbose (int): the verbosity level
     Returns:
-        benchmarking (dict): dictionary containing the benchmarking results
+        train_benchmarking (dict): dictionary containing the benchmarking results
+        val_benchmarking (dict): dictionary containing the validation benchmarking results
     """
     possible_architectures = list(json.load(open(architecture_path)).keys())
+    progress = tqdm(total=len(possible_architectures), position=0, leave=True, disable=verbose!=0)
     for model_name in possible_architectures:
         # skip checking
         if model_name in train_benchmarking.keys():
@@ -643,7 +659,11 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
             if verbose > 1:
                 print(f"Skipping '{model_name}' because the folder is empty")
             continue
+        
 
+        if verbose == 0:
+            progress.set_description(f"Loading '{model_name.rjust(25)}'")
+            progress.update(1)
         if verbose > 0:
             print(f"Loading '{model_name}' data from '{folder}'")
 
@@ -660,8 +680,9 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
                 metric_list.append(train_data)
             
             # Get the composite array
+            metric_list = [data for data in metric_list if data is not None]
             composite_array = np.array(metric_list)
-            mean = np.mean(composite_array, axis=0)
+            mean = np.nanmean(composite_array, axis=0, )
             if do_std:
                 std = np.std(composite_array, axis=0)
             else:
@@ -699,9 +720,10 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
         # add additional key and values to the benchmarking dictionary
         val_benchmarking[model_name]['mean'] = mean_metric_dict
         val_benchmarking[model_name]['std'] = std_metric_dict
+    progress.close()
     
     # print(train_benchmarking)
-    return train_benchmarking,val_benchmarking
+    return train_benchmarking, val_benchmarking
 
 
 def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5,
@@ -829,6 +851,111 @@ def plotly_results(benchmarking:dict, constants:tuple, scale:int=5, repeat:int=5
                 os.remove(replace_path)
         fig.write_image(os.path.join(fig_path, fig_name))
     fig.show()
+
+
+def save_figure(file_path:str="images/ablation_study.png", save_fig:bool=True, replace_fig:bool=False) -> None:
+    if save_fig:
+        if os.path.exists(file_path):
+            last_char = file_path[-5]
+            if last_char.isdigit():
+                last_char = str(int(last_char) + 1)
+            else:
+                last_char = "1"
+            file_path = file_path[:-5] + last_char + file_path[-4:]
+        plt.savefig(file_path)
+
+
+def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fontsize=15,
+                  errors:str='raise', verbose:int=0) -> None:
+    """
+    This function plots the ablation study results
+    Parameters:
+        repeat (int): number of times to repeat the experiment
+        save_fig (bool): whether to save the figure
+        replace_fig (bool): whether to replace the old figure
+        fontsize (int): the fontsize of the text
+        errors (str): how to handle errors
+        verbose (int): the verbosity level
+    """
+    assert isinstance(repeat, int), f"repeat must be an integer not {type(repeat)}"
+    assert repeat > 0, f"repeat must be greater than 0 not {repeat}"
+    assert isinstance(save_fig, bool), f"save_fig must be a boolean not {type(save_fig)}"
+    assert isinstance(replace_fig, bool), f"replace_fig must be a boolean not {type(replace_fig)}"
+    assert isinstance(fontsize, int), f"fontsize must be an integer not {type(fontsize)}"
+    assert isinstance(errors, str), f"errors must be a string not {type(errors)}"
+    assert errors in ["raise", "ignore", "flag"], f"errors must be 'raise', 'ignore', or 'flag' not '{errors}'"
+    assert isinstance(verbose, int), f"verbose must be an integer not {type(verbose)}"
+    assert verbose >= -1, f"verbose must be greater than or equal to -1 not {verbose}"
+    
+    # Get the constants
+    dataset_name_no_matter_qqq = "covtype"
+    train_metrics = ["acc", "time"]
+    val_metrics = []
+    
+    # Load the data
+    train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name_no_matter_qqq, 
+                                                           repeat=repeat, verbose=verbose, 
+                                                           train_metrics=train_metrics, val_metrics=val_metrics)
+    
+    row_names = ["Training Accuracy", "Training Time"]
+    metrics = train_metrics + val_metrics
+    row_count = len(row_names)
+    assert row_count == len(metrics), f"row_count ({row_count}) must be equal to the number of metrics ({len(metrics)})"
+    col_names = list(set([model.split("_")[1] for model in list(train_benchmarking.keys())]))
+    model_types = list(set([model.split("_")[0] for model in list(train_benchmarking.keys())]))
+    col_count = len(col_names)
+    model_count = len(model_types)
+    
+    def get_end_vals(model_names, metric, stat):
+        # this is kinda janky sorry
+        array = [np.mean(train_benchmarking[model_name][stat][metric][-min(len(train_benchmarking[model_name][stat][metric]), 5):]) if \
+                                    isinstance(train_benchmarking[model_name][stat][metric], list) else \
+                                        train_benchmarking[model_name][stat][metric]
+                                    for model_name in model_names]
+        if type(array[0]) == np.ndarray:
+            return np.array([arr[-1] for arr in array])
+        return np.array(array)
+    
+    # Create the figure
+    plt.figure(figsize=(col_count*5, row_count*5), dpi=300)
+    cmap = plt.get_cmap('Set1')
+    progress = tqdm(total=row_count*col_count*model_count, position=0, leave=True, disable=verbose!=0, desc="Building Plots")
+    for i, row_name, metric in zip(range(row_count), row_names, metrics):
+        for j, col_name in enumerate(col_names):
+            plt.subplot(row_count, col_count, i*col_count + j + 1)
+            for k, model_type in enumerate(model_types):
+                run_name = f"{model_type}_{col_name}"
+                model_names = [model for model in train_benchmarking.keys() if run_name in model]
+                sizes = [int(key.split("_")[-1]) for key in model_names]
+                means = get_end_vals(model_names, metric, "mean")
+                stds = get_end_vals(model_names, metric, "std")
+                label = model_type # if i + j == 0 else None # only show the label once
+                progress.update()
+                try:
+                    plt.fill_between(sizes, means-stds, means+stds, alpha=.1, color=cmap(k))
+                except:
+                    continue
+                plt.plot(sizes, means, label=label, marker='o', lw=2, color=cmap(k))
+            if i == 0:
+                plt.title(col_name, fontsize=fontsize-2)
+            if i == row_count - 1:
+                plt.xlabel("Parameter Count", fontsize=fontsize-4)
+            if j == 0:
+                plt.ylabel(row_name, fontsize=fontsize-4)
+            plt.xscale("log")
+            ticks = [int(round(size, -2)) for size in sizes]
+            plt.xticks(ticks, [f"{size/1000}k" for size in ticks])
+            plt.grid(True, linestyle='--', alpha=0.5)
+    progress.close()
+    print("Preparing your figure, please wait 10-15 seconds.")
+    plt.suptitle("Ablation Study Over Data Sizes", fontsize=fontsize+2)
+    plt.legend(loc="center right", fontsize=fontsize-4)
+    plt.tight_layout()
+    save_figure(save_fig=save_fig, replace_fig=replace_fig)
+    plt.show()
+    
+    
+    
     
 def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
                  save_fig:bool=True, replace_fig:bool=False, 
@@ -836,7 +963,7 @@ def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
                  train_metrics:list=["loss", "acc", "time", "params"],
                  val_metrics:list=["loss"], 
                  col_names:list= ['Validation Loss','Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
-                 errors:str='raise',verbose:int=0) -> None:
+                 errors:str='raise', verbose:int=0) -> None:
     """
     Plot the benchmarking results
     Parameters:
@@ -929,7 +1056,7 @@ def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
     model_name_dictionary = {}
     
     # Loop through the models and get the items from the model
-    loop = tqdm(total=num_rows, position=0, leave=True, disable=verbose<0)
+    loop = tqdm(total=num_models*(num_cols-1), position=0, leave=True, disable=verbose<0)
     for j in range(num_models):
         model_name, train_results = train_items[j]
         model_name_dictionary[model_name] = str(j)
@@ -982,7 +1109,7 @@ def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
                 # plt.ylabel(info_type)
                 
                 # If it is accuracy, plot a dotted line at 1
-                if info_type == "loss": # This is reversed as of rn with 'acc'
+                if info_type == "acc": # This is reversed as of rn with 'acc'
                     plt.axhline(y=1, color='k', linestyle='--')
                     plt.ylim(scales[i])
                     plt.ylim([0, 1.1])
@@ -1039,3 +1166,347 @@ def plot_results(dataset_name:str, scale:int=5, repeat:int=5,
                 os.remove(replace_path)
         plt.savefig(os.path.join(fig_path, fig_name))
     plt.show()
+    
+    
+    
+    
+    
+
+def compute_plot_scales(scale_percentile:float, num_cols:int, num_models:int, 
+                        train_items:list, val_items:list) -> dict:
+    """
+    Compute the x and y scales for the plots
+    Helpful for plotting the data in plotly so that all of the plots are on the same scale
+    Parameters:
+        scale_percentile (float): the percentile of points we want to cut off in our y-axis
+        num_cols (int): the number of columns in the plot
+        num_models (int): the number of models
+        train_items (list): the training items
+        val_items (list): the validation items
+    Returns:
+        scales (dict): a dictionary containing the scales for the plots
+    """
+    # modify unset inputs
+    lower_percentile = 0.025 if scale_percentile is None else scale_percentile/2
+    upper_percentile = 0.975 if scale_percentile is None else 1 - scale_percentile/2
+    
+    border = .1
+    scales = {i:[] for i in range(num_cols-1)}
+    for j in range(num_models):
+        model_name, train_results = train_items[j]
+        _, val_results = val_items[j]
+        train_means = train_results['mean']
+        val_means = val_results["mean"]
+        means = list(val_means.items()) + list(train_means.items())
+        
+        # Loop through the different types of graphs to plot
+        for i, (info_type, means) in enumerate(means):
+            if info_type in ["time", "params"]:
+                scales[i].append(means)
+            else:
+                scales[i].append(np.percentile(means, 100*upper_percentile))
+                scales[i].append(np.percentile(means, 100*lower_percentile))
+    scales = {i: [np.min(scales[i]) - border*np.abs(np.min(scales[i])), 
+                  np.max(scales[i]) + border*np.abs(np.max(scales[i]))] 
+              for i in range(num_cols-1)}
+    return scales
+
+
+def get_colors(alpha:float=0.2) -> list:
+    """
+    This function creates a list of colors with an alpha value
+    Helpful for making the plotly data look nice
+    Parameters:
+        alpha (float): the alpha value for the colors
+    Returns:
+        colors (list): a list of colors with an alpha value
+    """
+    # check input
+    assert isinstance(alpha, float), f"alpha must be a float not {type(alpha)}"
+    assert 0 < alpha <= 1, f"alpha must be between 0 and 1 not {alpha}"
+
+    colors = plt.get_cmap('tab20').colors
+    max_val = 255
+    return [(int(r*max_val), int(g*max_val), int(b*max_val)) for r, g, b in colors]
+
+
+def count_rows(num_models:int, models_per_graph:int=None) -> tuple:
+    """
+    This function counts the number of rows and returns the number of rows and the number of models per graph
+    Helpful for determining the number of rows and models per graph in the plotly graph of benchmarking results
+    Parameters:
+        num_models (int): the number of models
+        models_per_graph (int): the number of models per graph
+    Returns:
+        num_rows (int): the number of rows
+        models_per_graph (int): the number of models per graph
+    """
+    if models_per_graph is not None:
+        num_rows = int(math.ceil(num_models / models_per_graph))
+    else:
+        num_rows = 1
+        models_per_graph = num_models
+    return num_rows, models_per_graph
+
+
+def count_columns(train_metrics:list, val_metrics:list, col_names:list, 
+                  num_train_plots:int, num_val_plots:int) -> tuple:
+    """
+    This function counts the number of columns and returns the column names
+    Helpful for determining the number of columns and the column names in the plotly graph of benchmarking results
+    Parameters:
+        train_metrics (list): the metrics to plot for the training data
+        val_metrics (list): the metrics to plot for the validation data
+        col_names (list): the names of the columns
+        num_train_plots (int): the number of training plots
+        num_val_plots (int): the number of validation plots
+    Returns:
+        num_cols (int): the number of columns
+        col_names (list): the names of the columns
+    """
+    # check inputs
+    assert isinstance(train_metrics, list), f"train_metrics must be a list not {type(train_metrics)}"
+    assert isinstance(val_metrics, list), f"val_metrics must be a list not {type(val_metrics)}"
+    assert isinstance(col_names, list), f"col_names must be a list not {type(col_names)}"
+    assert isinstance(num_train_plots, int), f"num_train_plots must be an integer not {type(num_train_plots)}"
+    assert isinstance(num_val_plots, int), f"num_val_plots must be an integer not {type(num_val_plots)}"
+    assert num_train_plots > 0, f"num_train_plots must be greater than 0 not {num_train_plots}"
+    assert num_val_plots > 0, f"num_val_plots must be greater than 0 not {num_val_plots}"
+    
+    num_cols = num_train_plots + num_val_plots + 1
+    if num_cols != len(col_names) + 1:
+        print(f"Warning: Must specify the correct number of column names. Expected {num_cols-1} but got {len(col_names)}")
+        col_names = ["Val " + name for name in val_metrics] + ["Train " + name for name in train_metrics]
+    col_names = ["Model"] + col_names
+    return num_cols, col_names
+
+
+def process_line(means:np.array, stds:np.array, j:int, repeat:int, 
+                 model_name:str, info_type:str, pnt_density:int, n_epochs:int,
+                 errors:str='raise') -> tuple:
+    """
+    This function processes the line for the plotly graph
+    Helpful for processing the line to plot in the plotly graph of benchmarking results
+    Parameters:
+        means (np.array): the means of the data
+        stds (np.array): the standard deviations of the data
+        j (int): the index of the model
+        repeat (int): the number of times to repeat the experiment
+        model_name (str): the name of the model
+        info_type (str): the type of information
+        pnt_density (int): the density of the points
+        n_epochs (int): the number of epochs
+        errors (str): how to handle errors
+    Returns:
+        means (np.array): the means of the data
+        stds (np.array): the standard deviations of the data
+        domain (np.array): the domain of the data
+        cont (bool): whether to continue
+    """
+    cont = False
+    try:
+        start = 0
+        if type(means) == np.float64:
+            means = np.array([means])
+            stds = np.array([stds])
+            start = j
+        if len(means) > pnt_density:
+            # downsample the 1d means data where pnt_density is the number of points desired
+            sep = max(int(len(means) / pnt_density), 1)
+            means = means[::sep]
+            stds = stds[::sep]
+        domain = np.linspace(start, n_epochs, len(means))
+    except TypeError as e:
+        if errors == "raise":
+            raise e
+        if errors == "ignore":
+            cont = True
+        if errors == "flag":
+            print("Error with", model_name, info_type, "-", e)
+            cont = True
+    standard_errors = stds / np.sqrt(repeat)
+    return means, standard_errors, domain, cont
+
+
+def add_model_results(fig:go.Figure, model_name:str, means:np.array, standard_errors:np.array,
+                        domain:np.array, colors:np.array, color_idx:int, current_row:int, i:int, 
+                        include_legend:bool=True, alpha:float=0.2) -> go.Figure:
+    """
+    This function adds the model results with standard deviations to the plotly graph
+    Helpful for adding the model results to the plotly graph of benchmarking results
+    Parameters:
+        fig (go.Figure): the plotly figure
+        model_name (str): the name of the model
+        means (np.array): the means of the data
+        standard_errors (np.array): the standard errors of the data
+        domain (np.array): the domain of the data
+        colors (np.array): the colors of the data
+        color_idx (int): the index of the color
+        current_row (int): the current row
+        i (int): the index
+        include_legend (bool): whether to include the legend
+    Returns:
+        fig (go.Figure): the plotly figure
+    """
+    sl = current_row==0 and include_legend
+    fig.add_trace(
+        go.Scatter(x=domain, y=means, mode='lines+markers', name=model_name,
+                   line=dict(color=f"rgb{colors[color_idx]}"), marker=dict(size=2), showlegend=sl),
+        row=current_row+1, col=i+1
+    )
+    # fill the area between the standard errors
+    rgba = colors[color_idx] + (alpha,)
+    fig.add_trace(
+        go.Scatter(x=domain, y=means + 2*standard_errors, mode='lines', line=dict(width=0),
+                fill='tonexty', fillcolor=f"rgba{rgba}", showlegend=False),
+        row=current_row+1, col=i+1
+    )
+    fig.add_trace(
+        go.Scatter(x=domain, y=means - 2*standard_errors, mode='lines', line=dict(width=0),
+                fill='tonexty', fillcolor=f"rgba{rgba}", showlegend=False),
+        row=current_row+1, col=i+1
+    )
+    return fig
+    
+    
+def plot_results_plotly(dataset_name:str, scale:int=5, repeat:int=5,
+                         save_fig:bool=True, replace_fig:bool=False,
+                         models_per_graph=None, scale_percentile=None, fontsize=15, include_legend:bool=True,
+                         train_metrics:list=["loss", "acc", "time", "params"],
+                         val_metrics:list=["loss"],
+                         col_names:list=['Validation Loss', 'Train Loss', 'Train Accuracy', 'Train Time', 'Num Parameters'],
+                         errors:str='raise', verbose:int=0) -> None:
+    """
+    Plot the benchmarking results using Plotly.
+    Parameters:
+        dataset_name (str): name of the dataset
+        scale (int): scale of the figure
+        repeat (int): number of times to repeat the experiment
+        save_fig (bool): whether to save the figure
+        replace_fig (bool): whether to replace the old figure
+        models_per_graph (int): number of models to plot on each row of graphs
+        scale_percentile (float): the percentile of points we want to cut off in our y-axis
+        fontsize (int): the fontsize of the text
+        include_legend (bool): whether to include the legend
+        train_metrics (list): the metrics to plot for the training data
+        val_metrics (list): the metrics to plot for the validation data
+        col_names (list): the names of the columns
+        errors (str): how to handle errors
+        verbose (int): the verbosity level
+    """
+    assert isinstance(dataset_name, str), f"dataset name must be a string, not {type(dataset_name)}"
+    assert isinstance(scale, int), f"'scale' must be an integer not {type(scale)}"
+    assert 0 < scale < 20, f"'scale' must be between 0 and 20 not {scale}"
+    assert isinstance(repeat, int), f"'repeat' must be an integer not {type(repeat)}"
+    assert repeat > 0, f"'repeat' must be greater than 0 not {repeat}"
+    assert isinstance(save_fig, bool), f"'save_fig' must be a boolean not {type(save_fig)}"
+    assert isinstance(replace_fig, bool), f"'replace_fig' must be a boolean not {type(replace_fig)}"
+    assert isinstance(models_per_graph, (int, type(None))), f"'models_per_graph' must be an integer or None not {type(models_per_graph)}"
+    assert isinstance(scale_percentile, (float, type(None))), f"'scale_percentile' must be a float or None not {type(scale_percentile)}"
+    if scale_percentile is not None:
+        assert 0 < scale_percentile < 1, f"'scale_percentile' must be between 0 and 1 not {scale_percentile}"
+    assert errors in ["raise", "ignore", "flag"], f"'errors' must be 'raise', 'ignore', or 'flag' not '{errors}'"
+    assert isinstance(verbose, int), f"'verbose' must be an integer not {type(verbose)}"
+
+    print("Starting")
+
+    # initialize the lists from the dictionaries of results
+    train_benchmarking, val_benchmarking = rebuild_results({}, {}, dataset_name, repeat=repeat, verbose=verbose,
+                                                           train_metrics=train_metrics, val_metrics=val_metrics)
+    train_items = list(train_benchmarking.items())
+    model_names = list(train_benchmarking.keys())
+    val_items = list(val_benchmarking.items())
+    
+    # Get the constants
+    date_format = "%y%m%d@%H%M"
+    date_time = dt.datetime.now().strftime(date_format)
+    n_epochs = json.load(open(config_path)).get("num_epochs")
+    pnt_density = 20
+    num_models = len(train_items)
+    num_train_plots = len(train_items[0][1]['mean'])
+    num_val_plots = len(val_items[0][1]['mean'])
+
+    # Set up plotly variables
+    num_rows, models_per_graph = count_rows(num_models, models_per_graph)
+    num_cols, col_names = count_columns(train_metrics, val_metrics, col_names, num_train_plots, num_val_plots)
+    colors = get_colors()
+    
+
+
+    # Create Plotly subplots
+    fig = make_subplots(rows=num_rows, cols=num_cols, 
+                           subplot_titles=col_names[1:], 
+                           vertical_spacing=0.02, horizontal_spacing=0.03)
+
+    # Loop through the models and get the items from the model
+    current_row = 0
+    model_name_dictionary = {}
+    loop = tqdm(total=num_models*(num_cols-1), position=0, leave=True, disable=verbose<0)
+    for j in range(num_models):
+        model_name, train_results = train_items[j]
+        model_name_dictionary[model_name] = str(j)
+        val_results = val_items[j][1]
+        train_means = train_results["mean"]
+        train_stds = train_results["std"]
+        val_means = val_results["mean"]
+        val_stds = val_results["std"]
+        color_idx = j % len(colors)
+
+        # Get the means and std list
+        means = list(val_means.items()) + list(train_means.items())
+        stds =  list(val_stds.items()) + list(train_stds.items())
+        
+        # Loop through the different graphs and get the right subplot
+        for i, (info_type, means), (_, stds) in zip(range(num_cols-1), means, stds):
+            if info_type in ["loss", "acc"]:
+                # format data correctly for plotting
+                means, standard_errors, domain, cont = process_line(means, stds, j, repeat, model_name, info_type, pnt_density, n_epochs, errors)
+                if cont: continue
+                
+                # plot the data with the standard errors
+                fig = add_model_results(fig, model_name, means, standard_errors, domain, 
+                                        colors, color_idx, current_row, i, include_legend)
+                
+                # If it is accuracy, plot a dotted line at 1
+                if info_type == "acc":
+                    fig.add_hline(y=1, line=dict(color='black', dash='dash'), row=current_row+1, col=i+1)
+                    fig.update_yaxes(range=[0, 1.1], row=current_row+1, col=i+1)
+            
+            # If it is TIME, do a log bar plot of the time
+            # If it is PARAMS, do a bar plot of the number of parameters
+            elif info_type in ["time", "params"]:
+                fig.add_trace(go.Bar(
+                    x=[model_name_dictionary[model_name]],
+                    y=[means],
+                    error_y=dict(type='data', array=np.array([stds]) if np.isscalar(stds) else np.array(stds)),
+                    marker=dict(color=f"rgb{colors[color_idx]}"),
+                    name=model_name, showlegend=include_legend, 
+                ), row=current_row+1, col=i+1)
+                if info_type == "time":
+                    fig.update_yaxes(type="log", row=current_row+1, col=i+1)
+            loop.update()
+                
+        # If we have collected enough models, record their names in the correct subplot
+        if (j+1) % models_per_graph == 0:
+            current_row += 1
+            if include_legend and current_row == 0:
+                fig.update_layout(legend=dict(title="Model Name", orientation="h", y=1.1, x=0.5, xanchor='center'))
+    loop.close()
+    
+    # Add our titles and add a little bit of padding
+    fig.update_layout(title=f"Model Benchmarking on '{dataset_name}'")
+    fig.update_layout(height=200*num_rows, width=1200)
+    
+    if save_fig:
+        if verbose > 0:
+            print("Saving your figure...")
+        fig_path = f"results/{dataset_name}/charts/"
+        fig_name = f"benchmarking_{date_time}.html"
+        if not os.path.exists(fig_path):
+            os.makedirs(fig_path)
+        if replace_fig:
+            old_files = [f for f in os.listdir(fig_path) if "benchmarking" in f and f.endswith(".html")]
+            for f in old_files:
+                os.remove(os.path.join(fig_path, f))
+        fig.write_html(os.path.join(fig_path, fig_name))
+    fig.show()
