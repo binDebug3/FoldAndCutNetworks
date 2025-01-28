@@ -645,8 +645,11 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
         train_benchmarking (dict): dictionary containing the benchmarking results
         val_benchmarking (dict): dictionary containing the validation benchmarking results
     """
-    possible_architectures = list(json.load(open(architecture_path)).keys())
-    progress = tqdm(total=len(possible_architectures), position=0, leave=True, disable=verbose!=0)
+    n_datasets = 5
+    
+    
+    possible_architectures = os.listdir(os.path.join("data/results", dataset_name))
+    progress = tqdm(total=len(possible_architectures) // n_datasets, position=0, leave=True, disable=verbose!=0)
     for model_name in possible_architectures:
         # skip checking
         if model_name in train_benchmarking.keys():
@@ -680,9 +683,23 @@ def rebuild_results(train_benchmarking:dict, val_benchmarking:dict, dataset_name
                 metric_list.append(train_data)
             
             # Get the composite array
-            metric_list = [data for data in metric_list if data is not None]
+            
+            
+            # metric_list = [data for data in metric_list if (data is not None) and ((len(data) > 75 or len(data)==1))]
+            metric_list = []
+            for data in metric_list:
+                if data is None:
+                    continue
+                try:
+                    if len(data) > 75 or len(data) == 1:
+                        metric_list.append(data)
+                except Exception as e:
+                    print(e)
             composite_array = np.array(metric_list)
-            mean = np.nanmean(composite_array, axis=0, )
+            try:
+                mean = np.nanmean(composite_array, axis=0)
+            except Exception as e:
+                print(e)
             if do_std:
                 std = np.std(composite_array, axis=0)
             else:
@@ -865,6 +882,75 @@ def save_figure(file_path:str="images/ablation_study.png", save_fig:bool=True, r
         plt.savefig(file_path)
 
 
+def get_sizes_hard_coded(dataset:str, model_arch:str, alt_name:str) -> list:
+    assert isinstance(dataset, str), f"dataset must be a string not {type(dataset)}"
+    assert isinstance(model_arch, str), f"model_arch must be a string not {type(model_arch)}"
+    assert isinstance(alt_name, str), f"alt_name must be a string not {type(alt_name)}"
+    assert dataset in ["cifar10", "HIGGS", "covtype", "digits", "fashionMNIST"], f"dataset must be 'cifar10', 'HIGGS', 'covtype', 'digits', or 'fashionMNIST' not '{dataset}'"
+    
+    path = f"data/results/{dataset}"
+    sizes = []
+    for folder in os.listdir(path):
+        if model_arch in folder and alt_name in folder and os.path.isdir(os.path.join(path, folder)):
+            sizes.append(int(folder.split("_")[-1]))
+    sizes.sort()
+    return sizes
+
+
+def fetch_data_for_model(model_arch:str, dataset:str, alt_name:str,  size:int, metric:str, errors:str="flag") -> np.ndarray:
+    assert isinstance(model_arch, str), f"model_arch must be a string not {type(model_arch)}"
+    assert model_arch in ["4Linear", "41Alt", "42Alt", "43Alt", "5Linear", "8Fold"], f"model_arch must be '4Linear', '41Alt', '42Alt', '43Alt', '5Linear', or '8Fold' not '{model_arch}'"
+    assert isinstance(dataset, str), f"dataset must be a string not {type(dataset)}"
+    assert dataset in ["cifar10", "HIGGS", "covtype", "digits", "fashionMNIST"], f"dataset must be 'cifar10', 'HIGGS', 'covtype', 'digits', or 'fashionMNIST' not '{dataset}'"
+    assert isinstance(alt_name, str), f"alt_name must be a string not {type(alt_name)}"
+    assert isinstance(size, int), f"size must be an integer not {type(size)}"
+    assert size > 0, f"size must be greater than 0 not {size}"
+    assert isinstance(metric, str), f"metric must be a string not {type(metric)}"
+    
+    path = f"data/results/{dataset}/{model_arch}_{alt_name}_{size}/npy_files"
+    if not os.path.exists(path):
+        if errors == "raise":
+            raise FileNotFoundError(f"Path '{path}' does not exist")
+        if errors == "flag":
+            print(f"Path '{path}' does not exist")
+        # if errors == 'ignore'
+        return np.nan, np.nan
+    
+    results = []
+    lengths = []
+    max_length = 0
+    for file in os.listdir(path):
+        if metric in file and file.endswith(".npy"):
+            results.append(np.load(os.path.join(path, file)))
+            try:
+                curr_length = len(results[-1])
+            except Exception as e:
+                curr_length = 1
+            lengths.append(curr_length) 
+            if curr_length > max_length:
+                max_length = curr_length
+    
+    if len(results) == 0:
+        return np.nan, np.nan
+    
+    
+    if max_length > 1:
+        for i, length in enumerate(lengths):
+            if length < max_length:
+                results[i] = np.concatenate((np.zeros(max_length - length), results[i]))
+    
+    # turn list of arrays into a 2d array rows = repeats, cols = epochs
+    results = np.array(results)
+    mean = np.mean(results, axis=0)
+    std = np.std(results, axis=0)
+    if type(mean) != np.float64:
+        final_length = min(5, len(mean))
+        mean = np.mean(mean[-final_length:])
+        std = np.mean(std[-final_length:])
+    return mean, std
+    
+    
+
 def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fontsize=15,
                   errors:str='raise', verbose:int=0) -> None:
     """
@@ -888,54 +974,50 @@ def plot_ablation(repeat:int=5, save_fig:bool=True, replace_fig:bool=True, fonts
     assert verbose >= -1, f"verbose must be greater than or equal to -1 not {verbose}"
     
     # Get the constants
-    dataset_name_no_matter_qqq = "covtype"
-    train_metrics = ["acc", "time"]
+    dataset_names = ["cifar10", "HIGGS", "covtype", "digits", "fashionMNIST"]
+    ds_name_in_files = ["Cifar10", "Higgs", "Cover", "Digits", "Fashion"]
+    col_names = ["Cifar", "Higgs", "Cover", "Digits", "Fashion"]
+    model_types = ["4Linear", "41Alt", "42Alt", "43Alt", "5Linear", "8Fold"]
+    train_metrics = ["val_acc", "inference_time"]
     val_metrics = []
     
-    # Load the data
-    train_benchmarking, val_benchmarking = rebuild_results({},{}, dataset_name_no_matter_qqq, 
-                                                           repeat=repeat, verbose=verbose, 
-                                                           train_metrics=train_metrics, val_metrics=val_metrics)
-    
-    row_names = ["Training Accuracy", "Training Time"]
+    row_names = ["Validation Accuracy", "Inference Time"]
     metrics = train_metrics + val_metrics
     row_count = len(row_names)
-    assert row_count == len(metrics), f"row_count ({row_count}) must be equal to the number of metrics ({len(metrics)})"
-    col_names = list(set([model.split("_")[1] for model in list(train_benchmarking.keys())]))
-    model_types = list(set([model.split("_")[0] for model in list(train_benchmarking.keys())]))
-    col_count = len(col_names)
+    col_count = len(dataset_names)
     model_count = len(model_types)
-    
-    def get_end_vals(model_names, metric, stat):
-        # this is kinda janky sorry
-        array = [np.mean(train_benchmarking[model_name][stat][metric][-min(len(train_benchmarking[model_name][stat][metric]), 5):]) if \
-                                    isinstance(train_benchmarking[model_name][stat][metric], list) else \
-                                        train_benchmarking[model_name][stat][metric]
-                                    for model_name in model_names]
-        if type(array[0]) == np.ndarray:
-            return np.array([arr[-1] for arr in array])
-        return np.array(array)
+    assert row_count == len(metrics), f"row_count ({row_count}) must be equal to the number of metrics ({len(metrics)})"
     
     # Create the figure
+    print("Starting")
     plt.figure(figsize=(col_count*5, row_count*5), dpi=300)
     cmap = plt.get_cmap('Set1')
     progress = tqdm(total=row_count*col_count*model_count, position=0, leave=True, disable=verbose!=0, desc="Building Plots")
+    
     for i, row_name, metric in zip(range(row_count), row_names, metrics):
-        for j, col_name in enumerate(col_names):
+        for j, col_name, dataset, alt_name in zip(range(col_count), col_names, dataset_names, ds_name_in_files):
             plt.subplot(row_count, col_count, i*col_count + j + 1)
-            for k, model_type in enumerate(model_types):
-                run_name = f"{model_type}_{col_name}"
-                model_names = [model for model in train_benchmarking.keys() if run_name in model]
-                sizes = [int(key.split("_")[-1]) for key in model_names]
-                means = get_end_vals(model_names, metric, "mean")
-                stds = get_end_vals(model_names, metric, "std")
-                label = model_type # if i + j == 0 else None # only show the label once
+            for k, model_arch in enumerate(model_types):
+                sizes = get_sizes_hard_coded(dataset, model_arch, alt_name)
+                means, stds = [], []
+                for size in sizes:
+                    mean, std = fetch_data_for_model(model_arch, dataset, alt_name, size, metric)
+                    if mean is np.nan:
+                        continue
+                    means.append(mean)
+                    stds.append(std)
                 progress.update()
-                try:
-                    plt.fill_between(sizes, means-stds, means+stds, alpha=.1, color=cmap(k))
-                except:
+                if len(means) == 0:
                     continue
-                plt.plot(sizes, means, label=label, marker='o', lw=2, color=cmap(k))
+                try:
+                    means = np.array(means)
+                    stds = np.array(stds)
+                    sizes = np.array(sizes)
+                    plt.fill_between(sizes, means-stds, means+stds, alpha=.1, color=cmap(k))
+                except Exception as e:
+                    print(e)
+                    continue
+                plt.plot(sizes, means, label=model_arch, marker='o', lw=2, color=cmap(k))
             if i == 0:
                 plt.title(col_name, fontsize=fontsize-2)
             if i == row_count - 1:
