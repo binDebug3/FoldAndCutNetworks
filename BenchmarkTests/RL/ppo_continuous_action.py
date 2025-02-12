@@ -165,7 +165,7 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    fold_str = f"_fold_{args.activation_func}" if args.fold else ""
+    fold_str = f"_fold" if args.fold else ""
     run_name = os.path.join(f"{args.env_id}", f"ppo{fold_str}", f"{args.seed}")
     if args.track:
         import wandb
