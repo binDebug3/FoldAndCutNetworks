@@ -2,6 +2,7 @@ import fire
 from stable_baselines3 import SAC, PPO
 from BenchmarkTests.RL.custom_policy import CustomPPOPolicy, CustomSACPolicy
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.utils import set_random_seed
 from BenchmarkTests.RL.utils import count_parameters, NumParamsCallback
 import numpy as np
 import json
@@ -16,9 +17,13 @@ def main(env:str, model_index:int, mlp:bool, no_relu:bool, run_num:int) :
 
     log_path = 'BenchmarkTests/RL/logs/' + env.split('-')[0] + '/'
 
+    # set the random seed
+    set_random_seed(run_num)
+
     if env in ['CartPole-v1', 'LunarLander-v3'] :
         custom_policy_kwargs=dict(model_name=model_name, no_relu=no_relu)
         if env == 'CartPole-v1' : 
+            # best hyperparameters for CartPole-v1
             vec_env = make_vec_env(env, n_envs=8)
             kwargs=dict(policy_kwargs=custom_policy_kwargs, 
                         n_steps=32, batch_size=256, gae_lambda=0.8,
@@ -26,6 +31,7 @@ def main(env:str, model_index:int, mlp:bool, no_relu:bool, run_num:int) :
                         clip_range=0.2, verbose=1, tensorboard_log=log_path, 
                         device='cpu')
         if env == 'LunarLander-v3' :
+            # best hyperparameters for LunarLander-v2
             vec_env = make_vec_env(env, n_envs=16)
             kwargs=dict(policy_kwargs=custom_policy_kwargs, 
                         n_steps=1024, batch_size=64, gae_lambda=0.98,
@@ -71,6 +77,7 @@ def main(env:str, model_index:int, mlp:bool, no_relu:bool, run_num:int) :
                 tb_log_name=get_exp_name(benchmark_models[model_index], 
                                          mlp, no_relu, run_num),
                 callback=NumParamsCallback())
+    model.save(log_path + model_name + f'_{run_num}')
     
 
 

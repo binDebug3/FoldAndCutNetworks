@@ -3,6 +3,7 @@ import os.path as osp
 import json
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.transforms as T
 from sklearn.model_selection import KFold
@@ -46,20 +47,29 @@ def train(train_loader, model, ds_name, optimizer, device):
 
 
 # Get acc. of GNN model.
-def test(loader, model, device):
+def test(loader, model, device, dataset):
+    mse_loss = nn.MSELoss()
     model.eval()
-
-    correct = 0
-    for data in loader:
-        data = data.to(device)
-        output = model(data)
-        pred = output.max(dim=1)[1]
-        correct += pred.eq(data.y).sum().item()
-    return correct / len(loader.dataset)
+    with torch.no_grad() :
+        correct = 0.0
+        total_loss = 0.0
+        for data in loader:
+            data = data.to(device)
+            output = model(data)
+            if dataset in ["QM9"] :
+                loss = mse_loss(output, data.y)
+                total_loss += loss.item()
+            else :
+                pred = output.max(dim=1)[1]
+                correct += pred.eq(data.y).sum().item()
+    if dataset in ["QM9"] :
+        return total_loss
+    else :
+        return correct / len(loader.dataset)
 
 
 # 5-CV for GNN training and hyperparameter selection.
-def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_epochs=200, batch_size=128, start_lr=0.01, 
+def gnn_evaluation(gnn, ds_name, layers=[3,4,5], hidden=[32,64,128], fold=False, max_num_epochs=100, batch_size=128, start_lr=0.01, 
                    min_lr = 0.000001, factor=0.5, patience=5, all_std=True):
     """
     Run an evaluation of our GNN.
@@ -86,7 +96,7 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
     if data_parent == "TUDataset":
         dataset = TUDataset(path, name=ds_name).shuffle()
     elif data_parent == "QM9":
-        dataset = QM9(path)
+        dataset = QM9(path).shuffle()
     elif data_parent == "GNNBenchmarkDataset":
         dataset = GNNBenchmarkDataset(path, name=ds_name).shuffle()
     elif data_parent == "AttributedGraphDataset":
@@ -117,14 +127,8 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
     # Set device.
     # device = torch.device('cpu') 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-    # Set up cross validation
-    if ds_name == "Cora":
-        num_folds = 1 # Cora only has one graph
-    else:
-        num_folds = 5
 
-    kf = KFold(n_splits=num_folds, shuffle=True)
+    kf = KFold(n_splits=5, shuffle=True)
     dataset.shuffle()
 
     test_accuracies_all = []
@@ -137,56 +141,78 @@ def gnn_evaluation(gnn, ds_name, layers=[1], hidden=[32], fold=False, max_num_ep
             experiment_report = {"Layers": l, "Hidden Size": h}
             test_accuracies = []
 
-            for train_val_index, test_index in kf.split(list(range(len(dataset)))):
-                # Sample 10% split from training split for validation.
-                train_index, val_index = train_test_split(train_val_index, test_size=0.1)
-                best_val_acc = 0.0
-                best_test = 0.0
-                
-                # Split data.
-                train_dataset = dataset[train_index.tolist()]
-                val_dataset = dataset[val_index.tolist()]
-                test_dataset = dataset[test_index.tolist()]
+            # Setup model.
+            model = gnn(dataset.num_features, hidden_channels=h, num_layers=l, num_classes=dataset.num_classes, 
+                        graph_level_task=graph_level_task, fold=fold).to(device)
+            num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            try:
+                model.reset_parameters()
+            except:
+                pass
 
-                # Prepare batching.
-                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-                val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
-                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+            optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
+                                                                        factor=factor, patience=patience,
+                                                                        min_lr=0.0000001)
 
-                # Setup model.
-                model = gnn(dataset.num_features, hidden_channels=h, num_layers=l, num_classes=dataset.num_classes, 
-                            graph_level_task=graph_level_task, fold=fold).to(device)
-                num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                try:
-                    model.reset_parameters()
-                except:
-                    pass
+            if ds_name != "Cora":
+                for fold_num, (train_index, test_val_index) in enumerate(kf.split(list(range(len(dataset))))):
+                    # 80% train, 10% val, 10% test
+                    val_index, test_index = train_test_split(test_val_index, test_size=0.5)
+                    best_val_acc = 0.0
+                    best_test = 0.0
+                    
+                    # Split data.
+                    train_dataset = dataset[train_index.tolist()]
+                    val_dataset = dataset[val_index.tolist()]
+                    test_dataset = dataset[test_index.tolist()]
 
-                optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
-                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
-                                                                       factor=factor, patience=patience,
-                                                                       min_lr=0.0000001)
+                    # Prepare batching.
+                    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+                    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+                    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+
+                    for epoch in range(1, max_num_epochs + 1):
+                        lr = scheduler.optimizer.param_groups[0]['lr']
+                        train(train_loader, model, ds_name, optimizer, device)
+                        val_acc = test(val_loader, model, device, ds_name)
+                        if epoch % 10 == 0:
+                            print(f"Epoch {epoch}; Validation accuracy: {val_acc}; Fold: {fold}, layers {l}, hidden {h}, fold num {fold_num}")
+                        scheduler.step(val_acc)
+
+                        if val_acc > best_val_acc:
+                            best_val_acc = val_acc
+                            # best_test = best_val_acc
+                            best_test = test(test_loader, model, device, ds_name) * 100.0
+
+                        # Break if learning rate is smaller 10**-6.
+                        if lr < min_lr:
+                            break
+
+                    test_accuracies.append(best_test)
+                    if all_std:
+                        test_accuracies_complete.append(best_test)
+
+            else : 
+                train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+                best_acc = 0.0
                 for epoch in range(1, max_num_epochs + 1):
                     lr = scheduler.optimizer.param_groups[0]['lr']
                     train(train_loader, model, ds_name, optimizer, device)
-                    val_acc = test(val_loader, model, device)
+                    acc = test(train_loader, model, device, ds_name)*100.0
                     if epoch % 10 == 0:
-                        print(f"Epoch {epoch}; Validation accuracy: {val_acc}; Fold: {fold}")
-                    scheduler.step(val_acc)
+                        print(f"Epoch {epoch}; Validation accuracy: {acc}; Fold: {fold}, layers {l}, hidden {h}")
+                    scheduler.step(acc)
 
-                    if val_acc > best_val_acc:
-                        best_val_acc = val_acc
-                        # best_test = best_val_acc
-                        best_test = test(test_loader, model, device) * 100.0
+                    if acc > best_acc :
+                        best_acc = acc
 
                     # Break if learning rate is smaller 10**-6.
                     if lr < min_lr:
                         break
 
-                test_accuracies.append(best_test)
-                if all_std:
-                    test_accuracies_complete.append(best_test)
-
+                test_accuracies.append(best_acc)
+            
             test_accuracies_all.append(float(np.array(test_accuracies).mean()))
             experiment_report["Average Best Accuracy"] = float(np.array(test_accuracies).mean())
             experiment_report["Parameters"] = num_params

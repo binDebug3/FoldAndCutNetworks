@@ -21,6 +21,39 @@
         "learning_rate": 0.001, 
         "repeat": 3
     },
+    "two_hidden_layer_8x_softfold_has_stretch_crease_sign_minus1": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":-1}},
+            {"type": "Linear", "params": {"in_features": 8, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":-1}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_8x_softfold_has_stretch_crease_sign0": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":0}},
+            {"type": "Linear", "params": {"in_features": 8, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":0}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_8x_softfold_has_stretch_crease_sign1": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":1}},
+            {"type": "Linear", "params": {"in_features": 8, "out_features": 8}},
+            {"type": "SoftFold", "params": {"width": 8, "has_stretch": true, "crease_sign":1}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
     "two_hidden_layer_15x_softfold_has_stretch": {
         "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
         "structure": [
@@ -32,13 +65,35 @@
         "learning_rate": 0.001, 
         "repeat": 3
     },
-    "two_hidden_layer_16x_softfold_has_stretch": {
+    "two_hidden_layer_16x_softfold_has_stretch_crease_sign_minus1": {
         "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
         "structure": [
-            {"type": "Linear", "params": {"in_features": 1, "out_features": 15.8}},
-            {"type": "SoftFold", "params": {"width": 15.8, "has_stretch": true}},
-            {"type": "Linear", "params": {"in_features": 15.8, "out_features": 15.8}},
-            {"type": "SoftFold", "params": {"width": 15.8, "has_stretch": true}}
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": -1}},
+            {"type": "Linear", "params": {"in_features": 16, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": -1}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_16x_softfold_has_stretch_crease_sign0": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": 0}},
+            {"type": "Linear", "params": {"in_features": 16, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": 0}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_16x_softfold_has_stretch_crease_sign1": {
+        "string": ["Linear", "SoftFold", "Linear", "SoftFold"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": 1}},
+            {"type": "Linear", "params": {"in_features": 16, "out_features": 16}},
+            {"type": "SoftFold", "params": {"width": 16, "has_stretch": true, "crease_sign": 1}}
         ], 
         "learning_rate": 0.001, 
         "repeat": 3
@@ -120,6 +175,15 @@
         "structure": [
             {"type": "Linear", "params": {"in_features": 1, "out_features": 2}},
             {"type": "SoftFold", "params": {"width": 2, "has_stretch": true}}
+        ], 
+        "learning_rate": 0.001, 
+        "repeat": 3
+    },
+    "two_hidden_layer_4x_linear_has_stretch": {
+        "string": ["Linear","Linear"], 
+        "structure": [
+            {"type": "Linear", "params": {"in_features": 1, "out_features": 4}},
+            {"type": "Linear", "params": {"in_features": 4, "out_features": 4}}
         ], 
         "learning_rate": 0.001, 
         "repeat": 3

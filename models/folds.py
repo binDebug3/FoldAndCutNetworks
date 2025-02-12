@@ -108,7 +108,7 @@ class SoftFold(nn.Module):
         Parameters:
             width (int): The expected input dimension.
             crease (float, optional): The crease parameter. If None, it will be initialized as a learnable parameter.
-            has_stretch (bool): Whether the module allows stretching.
+            has_stretch (bool): Whether the module allows the stretch parameter to be learnable. Fixed at 2.0 if False.
         """
         super().__init__()
         # Hyperparameters
@@ -136,7 +136,7 @@ class SoftFold(nn.Module):
         
 
             
-    def crease_dist(self, n_samples=1, std=0.5):
+    def crease_dist(self, n_samples=1, std=0.4) -> torch.Tensor:
         """
         Create the crease parameter by sampling from two normal distributions
         centered at -1 and 1 with a standard deviation of 0.5.
@@ -146,11 +146,8 @@ class SoftFold(nn.Module):
         Returns:
             crease (torch.Tensor): The crease parameter.
         """
-        # Randomly choose which distribution to sample from (50% chance for each mode)
-        mode_selector = torch.randint(0, 2, (n_samples,))
-        left_mode = torch.randn(n_samples) * std - 1
-        right_mode = torch.randn(n_samples) * std + 1
-        return torch.where(mode_selector == 0, left_mode, right_mode)
+        # Normal distribution centered at 1
+        return torch.randn(n_samples) * std + 1
     
 
     def forward(self, input_tensor:torch.Tensor) -> torch.Tensor:

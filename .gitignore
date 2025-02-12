@@ -15,3 +15,7 @@ BenchmarkTests/.ipynb_checkpoints/
 BenchmarkTests/RL/logs/*
 *.sh
 BenchmarkTests/GNN/datasets/*
+BenchmarkTests/GNN/experiments/*
+BenchmarkTests/RL/runs/*
+BenchmarkTests/RL/old_runs/*
+*.npy
