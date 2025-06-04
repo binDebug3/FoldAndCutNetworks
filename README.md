@@ -1,6 +1,6 @@
 # Origami Network
 
-Origami Network is a novel neural network architecture designed to transform high-dimensional data with efficient learning and reduced complexity. Inspired by principles of geometric folding, this model employs a custom **fold layer** to reshape data through learned hyperplanes, allowing for non-linear transformations that improve prediction speed and convergence.
+Origami Network is a novel neural network architecture designed to transform high-dimensional data with efficient learning and reduced complexity. Inspired by principles of geometric folding, this model employs a custom **fold layer** to reshape data through learned hyperplanes, allowing for non-linear transformations that improve prediction speed and convergence. Check out our [streamlit app](https://fold-and-cut-networks.streamlit.app/) for an interactive experience. 
 
 ## Table of Contents
 - [Overview](#overview)
@@ -85,6 +85,12 @@ Jeddy Bennett - jeddybennett01@gmail.com
 [![GitHub][github-icon]][github-url3]
 [![Email][email-icon]][email-url3]
 
+Nathaniel Driggs - nathanieldriggs@gmail.com
+
+[![LinkedIn][linkedin-icon]][linkedin-url4]
+[![GitHub][github-icon]][github-url4]
+[![Email][email-icon]][email-url4]
+
 ## License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
@@ -147,14 +153,17 @@ git push origin :newbranch      # Tell your fork to delete the example branch.
 [linkedIn-url1]: https://www.linkedin.com/in/dallinstewart/
 [linkedIn-url2]: https://www.linkedin.com/in/
 [linkedIn-url3]: https://www.linkedin.com/in/jeddy-bennett/
+[linkedIn-url4]: https://www.linkedin.com/in/ndriggs/
 
 
 [github-icon]: https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white
 [github-url1]: https://github.com/binDebug3
 [github-url2]: https://github.com/
 [github-url3]: https://github.com/jeddybennett
+[github-url4]: https://github.com/ndriggs
 
 [Email-icon]: https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white
 [Email-url1]: mailto:dallinpstewart@gmail.com
 [Email-url2]: mailto:dallinpstewart@gmail.com
 [Email-url3]: mailto:jeddybennett01@gmail.com
+[Email-url4]: mailto:nathanieldriggs@gmail.com
