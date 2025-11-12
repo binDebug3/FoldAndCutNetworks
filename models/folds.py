@@ -1,6 +1,7 @@
 import torch                    # type: ignore
 import torch.nn as nn           # type: ignore
 import torch.nn.functional as F # type: ignore
+from FoldLayer import Fold, SoftFold
 
 
 
